@@ -1,14 +1,22 @@
 """
 Nifty 50 Predictive Analytics Terminal - live web server (academic demonstration).
 
-Market data : Upstox API, read-only Analytics Token held on the server as a secret (never sent to the browser).
+Market data : Upstox API, read-only Analytics Token held on the server as a secret (never sent to the browser):
+              stocks, indices, MCX, candles, option chains (stocks and Nifty).
 EOD data    : NSE public archives (delivery %, participant open interest).
-News        : Google News RSS, scored with FinBERT (ProsusAI/finbert); a finance word list is the fallback.
-Model panels: shown as 'model in training' until the prediction model is validated.
+Nightly feed: one JSON file built after each close by the research pipeline (Colab): NSE index statistics
+              (P/E, P/B, yield, breadth, 30/365-day change), stock valuation (P/E, sector P/E, market cap, free
+              float, 52-week range, industry), FII/DII cash flows, results and macro calendar, trading holidays and
+              the frozen model's recorded calls. Live prices are laid over it during the session.
+Global      : Yahoo Finance chart data (feed snapshot as fallback).
+News        : Google News RSS (credible financial publishers only for market headlines), scored with FinBERT when
+              it can load, otherwise a finance word list.
 
-Environment variables (set as Hugging Face Space secrets):
+Environment variables (Render):
   UPSTOX_ANALYTICS_TOKEN  the Upstox Analytics Token (without it the page runs in clearly labelled DEMO mode)
   ACCESS_CODE             optional passcode that viewers must enter (recommended)
+  FEED_URL                where the nightly feed is published (optional; FEED_PATH, a file in this repo, otherwise)
+  FEED_TOKEN              read token for FEED_URL when it is private (optional)
 """
 from __future__ import annotations
 
@@ -16,6 +24,7 @@ import asyncio
 import gzip
 import hashlib
 import hmac
+import json
 import math
 import os
 import random
@@ -34,7 +43,7 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
-VERSION = "live-1.0 (2026-10-09)"
+VERSION = "live-2.0 (2026-10-26)"
 IST = ZoneInfo("Asia/Kolkata")
 HERE = Path(__file__).resolve().parent
 TOKEN = (os.environ.get("UPSTOX_ANALYTICS_TOKEN") or os.environ.get("UPSTOX_TOKEN") or "").strip()
@@ -48,6 +57,11 @@ NIFTY_CSV = os.environ.get("NIFTY_CSV", "https://www.niftyindices.com/IndexConst
 NEWS_RSS = os.environ.get("NEWS_RSS", "https://news.google.com/rss/search")
 CACHE_DIR = Path(os.environ.get("CACHE_DIR", "/tmp/terminal_cache"))
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
+FEED_PATH = Path(os.environ.get("FEED_PATH") or (HERE / "feed" / "terminal_feed.json"))
+FEED_URL = os.environ.get("FEED_URL", "").strip()
+FEED_TOKEN = os.environ.get("FEED_TOKEN", "").strip()
+FEED_SCHEMA = "terminal-feed/1"
+YAHOO = os.environ.get("YAHOO_CHART", "https://query1.finance.yahoo.com/v8/finance/chart").rstrip("/")
 BROWSER = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                          "Chrome/124.0 Safari/537.36", "Accept": "*/*", "Accept-Language": "en-US,en;q=0.9"}
 
