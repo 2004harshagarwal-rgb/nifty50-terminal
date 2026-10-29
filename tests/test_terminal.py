@@ -365,3 +365,23 @@ def test_feed_from_kaggle_morning_run_and_newest_wins(monkeypatch):
     monkeypatch.setattr(A.httpx, "get", lambda url, **k: R({"files": []}) if url.endswith("/kernels/output") else R(newer2))
     A.load_feed()
     assert A.STATE["feed"]["built_at"] == newer2["built_at"] and A.STATE["feed_src"] == "url"
+
+
+def test_kaggle_feed_with_an_api_token_uses_bearer(monkeypatch):
+    got = {}
+
+    class R:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"files": []}
+
+    def fake_get(url, params=None, headers=None, auth=None, **k):
+        got.update(headers=headers, auth=auth)
+        return R()
+    monkeypatch.setattr(A.httpx, "get", fake_get)
+    monkeypatch.setattr(A, "KAGGLE_TOKEN", "tok")
+    monkeypatch.setattr(A, "KAGGLE_KERNEL", "harshagarwal2004/nifty50-morning")
+    assert A.kaggle_feed() is None
+    assert got["headers"] == {"Authorization": "Bearer tok"} and got["auth"] is None

@@ -68,7 +68,10 @@ FEED_SCHEMA = "terminal-feed/1"
 # read with the Kaggle API when KAGGLE_USERNAME and KAGGLE_KEY are set (Render settings). The newest feed wins.
 KAGGLE_USER = os.environ.get("KAGGLE_USERNAME", "").strip()
 KAGGLE_KEY = os.environ.get("KAGGLE_KEY", "").strip()
+KAGGLE_TOKEN = os.environ.get("KAGGLE_API_TOKEN", "").strip()          # newer Kaggle "API token" (Bearer), preferred
 KAGGLE_KERNEL = os.environ.get("FEED_KAGGLE_KERNEL", f"{KAGGLE_USER}/nifty50-morning" if KAGGLE_USER else "").strip()
+if not KAGGLE_KERNEL and os.environ.get("KAGGLE_API_TOKEN"):
+    KAGGLE_KERNEL = "harshagarwal2004/nifty50-morning"
 KAGGLE_API = os.environ.get("KAGGLE_API", "https://www.kaggle.com/api/v1").rstrip("/")
 YAHOO = os.environ.get("YAHOO_CHART", "https://query1.finance.yahoo.com/v8/finance/chart").rstrip("/")
 BROWSER = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -1076,11 +1079,12 @@ def _num(x):
 
 def kaggle_feed() -> dict | None:
     """terminal_feed.json from the latest output of the Kaggle morning kernel (None if not configured or missing)."""
-    if not (KAGGLE_USER and KAGGLE_KEY and KAGGLE_KERNEL and "/" in KAGGLE_KERNEL):
+    if not ((KAGGLE_TOKEN or (KAGGLE_USER and KAGGLE_KEY)) and KAGGLE_KERNEL and "/" in KAGGLE_KERNEL):
         return None
     owner, slug = KAGGLE_KERNEL.split("/", 1)
+    how = {"headers": {"Authorization": f"Bearer {KAGGLE_TOKEN}"}} if KAGGLE_TOKEN else {"auth": (KAGGLE_USER, KAGGLE_KEY)}
     r = httpx.get(f"{KAGGLE_API}/kernels/output", params={"userName": owner, "kernelSlug": slug},
-                  auth=(KAGGLE_USER, KAGGLE_KEY), timeout=30, follow_redirects=True)
+                  timeout=30, follow_redirects=True, **how)
     r.raise_for_status()
     body = r.json()
     files = body.get("files") or body.get("outputFiles") or []
