@@ -171,6 +171,8 @@ main{min-height:0;padding-block:.5rem;display:grid;grid-template-rows:minmax(0,1
 .pbig .v{font:600 1.75rem var(--mono);line-height:1}
 .pgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.3rem;margin-top:.35rem}
 .pnote{font-size:.68rem;color:var(--mute);line-height:1.4;margin-top:.3rem}
+.stretch{display:flex;flex-wrap:wrap;gap:.15rem .6rem;font:500 .72rem var(--mono);margin-top:.3rem}.stretch small{color:var(--mute);font-size:.62rem}
+.rd3 .lv{font-size:.7rem}
 .tchk{display:flex;align-items:center;gap:.4rem;margin-top:.35rem;font-size:.74rem;flex-wrap:wrap}
 .tchk input{width:6.2em;background:var(--panel2);border:1px solid var(--line);color:var(--text);font:500 .78rem var(--mono);padding:.12rem .3rem;border-radius:2px}
 .tchk b{font-family:var(--mono)}
@@ -273,7 +275,7 @@ footer{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-
     <div class="panel"><div class="movers" id="movers"></div></div>
     <div class="duo">
       <div class="panel"><div class="ph"><h2>Market news</h2><span class="tag">major financial media</span></div><div class="pb" id="mnews"></div></div>
-      <div class="panel"><div class="ph"><h2>Our predictions · next session</h2><span class="tag" id="mctag">—</span></div><div class="pb" id="mcalls"></div></div>
+      <div class="panel"><div class="ph"><h2>Our predictions · next session</h2><span class="tag grow" id="mctag">—</span><div class="tfs" id="mcview" role="group" aria-label="Prediction view"><button data-v="calls" title="Top 5 and bottom 5 of the next-day score, with the price each is 70% likely to touch">Calls</button><button data-v="radar" title="Stocks most likely to make a big move (touch +3% or -3%) in the next session, whichever way">Big moves</button></div></div><div class="pb" id="mcalls"></div></div>
     </div>
   </div>
   <div class="col c3">
@@ -320,7 +322,7 @@ footer{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-
 'use strict';
 const $=id=>document.getElementById(id);
 const store={get(k,d){try{const v=localStorage.getItem('n50.'+k);return v==null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem('n50.'+k,JSON.stringify(v))}catch(e){}}};
-const S={snap:null,by:{},mkt:null,q:{},sel:store.get('sel','HDFCBANK'),tf:'3m',msz:(m=>['move','cap','eq'].includes(m)?m:'move')(store.get('msize','move')),stock:null,daily:null,y1:null,news:null,model:undefined,tab:'market',busy:{},last:{}};
+const S={snap:null,by:{},mkt:null,q:{},sel:store.get('sel','HDFCBANK'),tf:'3m',msz:(m=>['move','cap','eq'].includes(m)?m:'move')(store.get('msize','move')),stock:null,daily:null,y1:null,news:null,model:undefined,tab:'market',busy:{},last:{},mcv:(v=>v==='radar'?'radar':'calls')(store.get('mcview','calls'))};
 /* Research constants from the development test (2019 to Sep 2025, out-of-sample walk-forward), per decile of the 5-session score:
    quantiles of z = log 5-session return / (60-day daily volatility x sqrt 5) at 10/25/50/75/90%, share that beat the Nifty, mean excess return. */
 const HOLIDAYS=['2026-11-08','2026-11-10','2026-11-24','2026-12-25'];
@@ -439,6 +441,7 @@ function renderMap(){const el=$('tmap');if(!el||!S.snap||S.tab!=='market')return
   el.innerHTML=html}
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(()=>{for(const k in _tw)delete _tw[k];requestAnimationFrame(redraw)});
 document.querySelectorAll('#msize button').forEach(b=>b.onclick=()=>{S.msz=b.dataset.sz;store.set('msize',S.msz);mapW.w=null;renderMap()});
+document.querySelectorAll('#mcview button').forEach(b=>b.onclick=()=>{S.mcv=b.dataset.v;store.set('mcview',S.mcv);renderMCalls()});
 function renderMovers(){const s=S.snap;if(!s)return;const all=(s.stocks||[]).slice().sort((a,b)=>b.pct-a.pct),g=all.slice(0,6),l=all.slice(-6).reverse();
   const chip=x=>`<span class="mc" data-sym="${esc(x.sym)}" tabindex="0" role="button"><b>${esc(x.sym)}</b><span class="num ${cls(x.pct)}">${pct(x.pct)}</span></span>`;
   $('movers').innerHTML=`<span class="lab">Gainers</span><div class="chips">${g.map(chip).join('')}</div><span class="lab">Losers</span><div class="chips">${l.map(chip).join('')}</div>`}
@@ -463,6 +466,10 @@ function openOf(sym){const x=S.by[sym];if(!x||!(x.open>0)||x.day!==todayIso()||n
 function ndEff(sym){const r=ndRow(sym),n=NDm();if(!r)return null;const O=openOf(sym||S.sel);if(!O||!n)return r;
   const g=Math.log(O/r.close)/r.s;let b=0;while(b<6&&g>ORV.e[b])b++;const T=ORV.t[b],E=(a,p)=>O*Math.exp(r.s*interp(p,n.grid,a));
   return {...r,night:r,open:O,T,exp_high:E(T[0],.5),exp_low:E(T[1],.5),c50:[E(T[2],.25),E(T[2],.75)],c80:[E(T[2],.1),E(T[2],.9)],up_level:E(T[0],.3),dn_level:E(T[1],.7)}}
+/* chance that the session high (up) or low (down) touches price X, and the price touched with chance p */
+function chanceTouch(r,x){return touchChance(r,x)}
+function levelAt(r,p,up){const n=NDm();if(!n||!r)return null;const B=r.open||r.close,zh=r.open?r.T[0]:n.zh,zl=r.open?r.T[1]:n.zl;return B*Math.exp(r.s*interp(up?1-p:p,n.grid,up?zh:zl))}
+function radarRows(){const n=NDm();if(!n)return[];return Object.keys(n.stocks).map(k=>{const r=ndEff(k),B=r.open||r.close,u=touchChance(r,B*1.03),d=touchChance(r,B*0.97);return {k,r,u,d,any:u+d}}).sort((a,b)=>b.any-a.any)}
 function liveHL(sym){const x=S.by[sym];return x&&x.high&&x.low&&ndDate()===todayIso()&&x.day===todayIso()?{h:x.high,l:x.low,c:x.ltp}:null}
 function renderMCalls(){const el=$('mcalls'),m=S.model,n=NDm();
   if(m===undefined){el.innerHTML='<div class="empty">Loading…</div>';return}
@@ -471,6 +478,11 @@ function renderMCalls(){const el=$('mcalls'),m=S.model,n=NDm();
   const rows=Object.entries(n.stocks).map(([k,v])=>({k,...v})),L=rows.filter(r=>r.call==='beat').sort((a,b)=>a.rank_1d-b.rank_1d),G=rows.filter(r=>r.call==='lag').sort((a,b)=>b.rank_1d-a.rank_1d);
   const row=(r0,up)=>{const r={...ndEff(r0.k),k:r0.k},lv=up?r.up_level:r.dn_level,hl=liveHL(r.k),hit=hl?(up?hl.h>=lv:hl.l<=lv):null;
     return `<div class="cr"><span class="sym" data-sym="${esc(r.k)}" tabindex="0">${esc(r.k)}${hit?' <span class="ok" title="level reached today">✓</span>':''}</span><span class="lv" title="${up?'Price the session high reaches with a 70% chance':'Price the session low reaches with a 70% chance'}${r.open?' · revised at the open ₹'+fmt(r.open)+' (night call ₹'+fmt(up?r.night.up_level:r.night.dn_level)+')':''}">${up?'↑':'↓'} ₹${fmt(lv,lv<1000?2:0)}</span></div>`};
+  document.querySelectorAll('#mcview button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.v===S.mcv));
+  if(S.mcv==='radar'){const R=radarRows(),avg=f=>R.length?R.reduce((a,x)=>a+x[f],0)/R.length*100:0;
+    const rr=x=>{const hl=liveHL(x.k),B=x.r.open||x.r.close,hu=hl&&hl.h>=B*1.03,hd=hl&&hl.l<=B*0.97;
+      return `<div class="cr rd3"><span class="sym" data-sym="${esc(x.k)}" tabindex="0">${esc(x.k)}${hu||hd?' <span class="ok" title="moved 3% today">✓</span>':''}</span><span class="lv" title="chance the high touches +3% / the low touches −3%">↑3% ${(x.u*100).toFixed(0)}% · ↓3% ${(x.d*100).toFixed(0)}%</span></div>`};
+    fitList(el,k=>`<div class="h3">Most likely to move ±3% · average stock ↑${avg('u').toFixed(0)}% ↓${avg('d').toFixed(0)}%</div>${R.slice(0,k).map(rr).join('')}<div class="pnote">Direction is not predicted here. Tested 2019–2025: the model's top 5 touched ±3% on 40% of days vs 19% for the average stock.</div>`,Math.min(10,R.length));return}
   fitList(el,k=>`${m.example?'<div class="warn"><b>Example rows.</b> Real calls appear after the first recorded day.</div>':''}<div class="calls2"><div><div class="h3">Leaders · beat the Nifty</div>${L.slice(0,k).map(r=>row(r,true)).join('')}</div><div><div class="h3">Laggards · lag the Nifty</div>${G.slice(0,k).map(r=>row(r,false)).join('')}</div></div>`,5)}
 function renderGlobal(){const el=$('glob'),g=S.mkt&&S.mkt.global;if(!g){el.innerHTML='<div class="empty">Global markets connect after the server update.</div>';return}
   el.innerHTML=g.map(x=>{const ch=(x[2]/x[3]-1)*100,isY=/10Y/.test(x[1]);return `<div class="gc" title="${esc(x[1])} · ${esc(x[5])} · ${new Date(x[4]).toLocaleString('en-GB',{...IST,day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})} IST"><div class="row"><span>${esc(x[1])}</span><span class="${cls(isY?x[2]-x[3]:ch)}">${isY?pp((x[2]-x[3])*100,0)+' bp':pct(ch)}</span></div><b>${isY?x[2].toFixed(2)+'%':fmt(x[2],x[2]<200?2:0)}</b></div>`}).join('')}
@@ -520,10 +532,12 @@ function renderPred(){const el=$('predg'),r=ndEff(),m=S.model;
   let live='';if(hl){const ins=hl.c>=r.c80[0]&&hl.c<=r.c80[1];live=`<div class="pnote"><b>Today so far:</b> high ₹${fmt(hl.h)} ${hl.h>=r.up_level?'<span class="ok">reached the ↑ level</span>':'<span class="no">↑ level not yet</span>'} · low ₹${fmt(hl.l)} ${hl.l<=r.dn_level?'<span class="ok">reached the ↓ level</span>':'<span class="no">↓ level not yet</span>'} · price ${ins?'inside':'outside'} the 80% range</div>`}
   el.innerHTML=`${m.example?'<div class="warn"><b>Example rows.</b> Real predictions appear after the first recorded day.</div>':''}<div class="row" style="align-items:center">${tag}<span class="dim" style="font-size:.7rem">chance to beat the Nifty ${(r.prob_beat_1d*100).toFixed(1)}%</span></div>
    <div class="pgrid">${C('Expected high','₹'+fmt(r.exp_high),P(r.exp_high,N&&N.exp_high),'bull')+C('Expected low','₹'+fmt(r.exp_low),P(r.exp_low,N&&N.exp_low),'bear')+C('↑ level · 70%','₹'+fmt(r.up_level),N?P(r.up_level,N.up_level):P(r.up_level)+' · 7 days in 10')+
-     C('↓ level · 70%','₹'+fmt(r.dn_level),N?P(r.dn_level,N.dn_level):P(r.dn_level)+' · 7 days in 10')+C('Close · 50% range',`₹${fmt(r.c50[0],0)}–${fmt(r.c50[1],0)}`,N?`night ₹${fmt(N.c50[0],0)}–${fmt(N.c50[1],0)}`:P(r.c50[0])+' to '+P(r.c50[1]))+C('Close · 80% range',`₹${fmt(r.c80[0],0)}–${fmt(r.c80[1],0)}`,N?`night ₹${fmt(N.c80[0],0)}–${fmt(N.c80[1],0)}`:P(r.c80[0])+' to '+P(r.c80[1]))}</div>${live}
+     C('↓ level · 70%','₹'+fmt(r.dn_level),N?P(r.dn_level,N.dn_level):P(r.dn_level)+' · 7 days in 10')+C('Close · 50% range',`₹${fmt(r.c50[0],0)}–${fmt(r.c50[1],0)}`,N?`night ₹${fmt(N.c50[0],0)}–${fmt(N.c50[1],0)}`:P(r.c50[0])+' to '+P(r.c50[1]))+C('Close · 80% range',`₹${fmt(r.c80[0],0)}–${fmt(r.c80[1],0)}`,N?`night ₹${fmt(N.c80[0],0)}–${fmt(N.c80[1],0)}`:P(r.c80[0])+' to '+P(r.c80[1]))}</div>${stretch(r,c)}${live}
    <div class="pnote">${N?'Re-centred on the opening price after the 09:08 pre-open auction (news before the open is in that price). Tested 2021–2025: expected high/low off by 0.70%/0.73% vs 0.82%/0.87% for the night call; 80% range 5% narrower with the same 80% hit rate.':'Tested 2019–2025 on data the model never saw: the close fell inside the 80% range 80.9% of the time and inside the 50% range 51.1%; stated chances of reaching a price matched what happened. Direction alone is close to a coin toss.'}</div>`;
   checkTouch();
   ['.pnote','.warn'].forEach(q=>{const p=$('pred');if(p.scrollHeight>p.clientHeight+1){const x=el.querySelector(q);if(x)x.remove()}})}
+function stretch(r,c){const L=(p,up)=>levelAt(r,p,up),f=v=>'₹'+fmt(v,v<1000?1:0),q=v=>pct((v/c-1)*100,1);if(!NDm())return'';
+  return `<div class="stretch"><span class="dim">Stretch</span> <span class="up">↑ 25%: ${f(L(.25,true))} <small>${q(L(.25,true))}</small> · 10%: ${f(L(.10,true))} <small>${q(L(.10,true))}</small></span> <span class="dn">↓ 25%: ${f(L(.25,false))} <small>${q(L(.25,false))}</small> · 10%: ${f(L(.10,false))} <small>${q(L(.10,false))}</small></span></div>`}
 function checkTouch(){const r=ndEff(),v=parseFloat(String($('tp').value).replace(/[₹,\s]/g,'')),o=$('tpo');if(!r){o.textContent='';return}
   if(!(v>0)){o.innerHTML=`<span class="dim">e.g. ${fmt(r.up_level*1.004,0)}</span>`;return}const ch=touchChance(r,v);
   o.innerHTML=`<b>${(ch*100).toFixed(0)}%</b> <span class="dim">chance the ${v>=(r.open||r.close)?'high':'low'} reaches ₹${fmt(v)} on ${dshort(ndDate())} (${pct((v/(r.open||r.close)-1)*100,1)} from the ${r.open?'open':'close'})</span>`}
