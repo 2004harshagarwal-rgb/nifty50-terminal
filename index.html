@@ -644,13 +644,16 @@ if(window.ResizeObserver){new ResizeObserver(()=>redraw()).observe(document.quer
 async function loadSnap(){if(S.busy.snap)return;S.busy.snap=1;try{const s=await api('api/snapshot');if(s.loading||s.error){$('loading').style.display='flex';$('loading').textContent=s.error?'Market data unavailable':'Connecting to market data…';return}
   $('loading').style.display='none';S.snap=s;S.by={};(s.stocks||[]).forEach(x=>S.by[x.sym]=x);if(!S.by[S.sel])S.sel=(S.by.HDFCBANK||s.stocks[0]).sym;
   renderMarketAll();renderStockAll();if(!S.stock)loadStock(true);if(!S.daily)loadDaily();if(!S.news)loadNews()}catch(e){console.warn(e)}finally{S.busy.snap=0}}
-async function loadMarket(){try{const m=await api('api/market');if(m&&(m.indices||m.global)){S.mkt=m;S.q={};(m.quotes||[]).forEach(q=>S.q[q.sym]=q);if(S.msz==='cap')mapW.w=null}}catch(e){}S.last.mkt=Date.now();renderMarketAll();renderStockAll()}
+/* a failed or not-yet-ready answer (server waking up) is retried after about 10 s instead of waiting for the normal interval */
+const RETRY=(k,full)=>{S.last[k]=Date.now()-full+10000};
+async function loadMarket(){let ok=false;try{const m=await api('api/market');if(m&&(m.indices||m.global)){S.mkt=m;S.q={};(m.quotes||[]).forEach(q=>S.q[q.sym]=q);if(S.msz==='cap')mapW.w=null;ok=!!(m.indices&&m.indices.length)}}catch(e){}
+  const open=S.snap&&S.snap.phase!=='CLOSED';if(ok)S.last.mkt=Date.now();else RETRY('mkt',open?60000:600000);renderMarketAll();renderStockAll()}
 async function loadStock(force){if(!S.sel||(S.busy.stock&&!force))return;S.busy.stock=1;const sym=S.sel;
   try{const d=await api(`api/stock/${encodeURIComponent(sym)}?tf=5m`);if(sym!==S.sel||d.error||d.loading)return;S.stock=d;S.last.stock=Date.now();renderStockAll()}catch(e){console.warn(e)}finally{S.busy.stock=0}}
 async function loadDaily(){const sym=S.sel;try{const d=await api(`api/daily/${encodeURIComponent(sym)}`);if(sym===S.sel&&d&&d.c){S.daily=d;renderStockAll()}}catch(e){console.warn(e)}}
 async function load1y(){const sym=S.sel;try{const d=await api(`api/stock/${encodeURIComponent(sym)}?tf=1y`);if(sym===S.sel){S.y1=d.candles||[];renderChart()}}catch(e){console.warn(e)}}
 async function loadNews(){const sym=S.sel;try{const j=await api(`api/news/${encodeURIComponent(sym)}`);if(sym===S.sel){S.news=j;renderStockAll()}}catch(e){console.warn(e)}S.last.news=Date.now()}
-async function loadModel(){S.last.model=Date.now();try{const j=await api('api/model');S.model=j&&j.stocks?j:null}catch(e){S.model=null}renderMarketAll();renderStockAll()}
+async function loadModel(){S.last.model=Date.now();try{const j=await api('api/model');S.model=j&&j.stocks?j:null}catch(e){if(S.model===undefined)S.model=null;RETRY('model',600000)}renderMarketAll();renderStockAll()}
 
 let t0=store.get('tab','market');try{const h=(location.hash||'').slice(1);if(h==='market'||h==='stock')t0=h}catch(e){}
 setTab(t0,false);$('tsym').textContent=S.sel;
