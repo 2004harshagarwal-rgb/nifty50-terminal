@@ -329,3 +329,39 @@ def test_delivery_skips_a_holiday_served_with_the_previous_file(servers):
     d = c.get("/api/stock/HDFCBANK?tf=5m", cookies={"tv_access": ck}).json()
     dates = [x[0] for x in d["deliv"]]
     assert len(dates) == len(set(dates)) == 20
+
+
+def test_feed_from_kaggle_morning_run_and_newest_wins(monkeypatch):
+    class R:
+        def __init__(self, j):
+            self.j = j
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self.j
+    newer = {"schema": A.FEED_SCHEMA, "built_at": "2026-11-02T08:31:00+05:30", "model": {"as_of": "2026-10-30"}}
+    older = {"schema": A.FEED_SCHEMA, "built_at": "2026-10-30T20:40:00+05:30", "model": {"as_of": "2026-10-30"}}
+    seen = []
+
+    def fake_get(url, params=None, auth=None, **k):
+        seen.append((url, params, auth))
+        if url.endswith("/kernels/output"):
+            return R({"files": [{"fileName": "state.tar", "url": "https://x/state"},
+                                {"fileName": "terminal_feed.json", "url": "https://x/feed"}], "log": ""})
+        return R(newer if url == "https://x/feed" else older)
+    monkeypatch.setattr(A.httpx, "get", fake_get)
+    monkeypatch.setattr(A, "KAGGLE_USER", "u")
+    monkeypatch.setattr(A, "KAGGLE_KEY", "k")
+    monkeypatch.setattr(A, "KAGGLE_KERNEL", "u/nifty50-morning")
+    monkeypatch.setattr(A, "FEED_URL", "https://drive/feed")
+    monkeypatch.setitem(A.STATE, "feed", None)
+    A.load_feed()
+    assert A.STATE["feed"]["built_at"] == newer["built_at"] and A.STATE["feed_src"] == "kaggle"
+    assert seen[0][1] == {"userName": "u", "kernelSlug": "nifty50-morning"} and seen[0][2] == ("u", "k")
+    # the Drive copy is newer (Kaggle run failed today): Drive wins, and an older build is never taken back
+    newer2 = dict(older, built_at="2026-11-02T20:40:00+05:30")
+    monkeypatch.setattr(A.httpx, "get", lambda url, **k: R({"files": []}) if url.endswith("/kernels/output") else R(newer2))
+    A.load_feed()
+    assert A.STATE["feed"]["built_at"] == newer2["built_at"] and A.STATE["feed_src"] == "url"

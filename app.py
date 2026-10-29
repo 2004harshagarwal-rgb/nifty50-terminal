@@ -64,6 +64,12 @@ DEFAULT_FEED_URL = "https://drive.google.com/uc?export=download&id=1AILJZ7MWIuNY
 FEED_URL = os.environ.get("FEED_URL", "" if os.environ.get("FEED_PATH") else DEFAULT_FEED_URL).strip()
 FEED_TOKEN = os.environ.get("FEED_TOKEN", "").strip()
 FEED_SCHEMA = "terminal-feed/1"
+# the automatic morning run on Kaggle (GitHub-scheduled, 07:45 IST) leaves terminal_feed.json in the kernel's output;
+# read with the Kaggle API when KAGGLE_USERNAME and KAGGLE_KEY are set (Render settings). The newest feed wins.
+KAGGLE_USER = os.environ.get("KAGGLE_USERNAME", "").strip()
+KAGGLE_KEY = os.environ.get("KAGGLE_KEY", "").strip()
+KAGGLE_KERNEL = os.environ.get("FEED_KAGGLE_KERNEL", f"{KAGGLE_USER}/nifty50-morning" if KAGGLE_USER else "").strip()
+KAGGLE_API = os.environ.get("KAGGLE_API", "https://www.kaggle.com/api/v1").rstrip("/")
 YAHOO = os.environ.get("YAHOO_CHART", "https://query1.finance.yahoo.com/v8/finance/chart").rstrip("/")
 BROWSER = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                          "Chrome/124.0 Safari/537.36", "Accept": "*/*", "Accept-Language": "en-US,en;q=0.9"}
@@ -1068,17 +1074,50 @@ def _num(x):
         return None
 
 
+def kaggle_feed() -> dict | None:
+    """terminal_feed.json from the latest output of the Kaggle morning kernel (None if not configured or missing)."""
+    if not (KAGGLE_USER and KAGGLE_KEY and KAGGLE_KERNEL and "/" in KAGGLE_KERNEL):
+        return None
+    owner, slug = KAGGLE_KERNEL.split("/", 1)
+    r = httpx.get(f"{KAGGLE_API}/kernels/output", params={"userName": owner, "kernelSlug": slug},
+                  auth=(KAGGLE_USER, KAGGLE_KEY), timeout=30, follow_redirects=True)
+    r.raise_for_status()
+    body = r.json()
+    files = body.get("files") or body.get("outputFiles") or []
+    for f in files:
+        name = f.get("fileName") or f.get("file_name") or f.get("name") or ""
+        if name.endswith("terminal_feed.json") and f.get("url"):
+            g = httpx.get(f["url"], timeout=60, follow_redirects=True)
+            g.raise_for_status()
+            return g.json()
+    return None
+
+
 def load_feed() -> None:
-    """Read the nightly feed from FEED_URL (if set) or FEED_PATH. Keeps the last good copy on any failure and never
-    goes back to an older build."""
+    """Read the feed: the Kaggle morning run (if configured) and FEED_URL, or FEED_PATH. The newest build wins.
+    Keeps the last good copy on any failure and never goes back to an older build."""
     try:
+        got = []
+        try:
+            k = kaggle_feed()
+            if k:
+                got.append((k, "kaggle"))
+                STATE["errors"].pop("feed_kaggle", None)
+        except Exception as e:  # noqa: BLE001
+            STATE["errors"]["feed_kaggle"] = f"Kaggle feed unavailable ({type(e).__name__})"
         if FEED_URL:
             h = dict(BROWSER)
             if FEED_TOKEN:
                 h["Authorization"] = f"Bearer {FEED_TOKEN}"
-            r = httpx.get(FEED_URL, headers=h, timeout=30, follow_redirects=True)
-            r.raise_for_status()
-            j, src = r.json(), "url"
+            try:
+                r = httpx.get(FEED_URL, headers=h, timeout=30, follow_redirects=True)
+                r.raise_for_status()
+                got.append((r.json(), "url"))
+            except Exception:  # noqa: BLE001
+                if not got:
+                    raise
+        if got:
+            j, src = max(got, key=lambda x: str((x[0] or {}).get("built_at", "")) if isinstance(x[0], dict) else "")
         elif FEED_PATH.exists():
             m = FEED_PATH.stat().st_mtime
             if m == STATE["feed_mtime"] and STATE["feed"]:
