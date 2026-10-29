@@ -1152,6 +1152,7 @@ def _feed_loop() -> None:
 def _feed_meta() -> dict:
     f = STATE["feed"] or {}
     return {"built_at": f.get("built_at"), "session": f.get("session"), "src": STATE["feed_src"],
+            "kaggle": STATE["errors"].get("feed_kaggle") or ("connected" if (KAGGLE_TOKEN or KAGGLE_KEY) else "not set"),
             "code_version": f.get("code_version")}
 
 
