@@ -849,7 +849,9 @@ async def _snapshot() -> dict:
     for r in uni:
         if r["sym"] in q:
             x = q[r["sym"]]
-            stocks.append({"sym": r["sym"], "name": r["name"], "group": r["group"], "ltp": x["ltp"], "pct": x["pct"], "chg": x["chg"]})
+            day = datetime.fromtimestamp(x["ltt"] / 1000, IST).date().isoformat() if x.get("ltt") else None
+            stocks.append({"sym": r["sym"], "name": r["name"], "group": r["group"], "ltp": x["ltp"], "pct": x["pct"], "chg": x["chg"],
+                           "high": x.get("high"), "low": x.get("low"), "day": day})
     nifty_pct = idx.get("NIFTY 50", {}).get("pct", 0.0)
     groups = []
     for g in GROUPS:
