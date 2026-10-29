@@ -99,7 +99,7 @@ INDUSTRY_GROUP = [  # official 'Industry' column -> display group (for any new c
 ]
 NEWS_ALIASES = {  # how the press names a company (used for the news search and to check each headline is about it)
     "SBIN": ["State Bank of India", "SBI"], "LT": ["Larsen & Toubro", "L&T"], "M&M": ["Mahindra & Mahindra", "M&M"],
-    "TMPV": ["Tata Motors"], "ETERNAL": ["Eternal", "Zomato", "Blinkit"], "INDIGO": ["IndiGo", "InterGlobe"],
+    "TMPV": ["Tata Motors"], "ETERNAL": ["Eternal Ltd", "Eternal shares", "Zomato", "Blinkit"], "INDIGO": ["IndiGo", "InterGlobe"],
     "HINDUNILVR": ["Hindustan Unilever", "HUL"], "BAJAJ-AUTO": ["Bajaj Auto"], "BEL": ["Bharat Electronics", "BEL"],
     "BSE": ["BSE shares", "BSE Ltd"], "JIOFIN": ["Jio Financial"], "MAXHEALTH": ["Max Healthcare"], "RELIANCE": ["Reliance Industries", "RIL"],
     "TCS": ["TCS", "Tata Consultancy"], "INFY": ["Infosys"], "HCLTECH": ["HCLTech", "HCL Tech"], "TECHM": ["Tech Mahindra"],
@@ -109,6 +109,10 @@ NEWS_ALIASES = {  # how the press names a company (used for the news search and 
     "TATACONSUM": ["Tata Consumer"], "ASIANPAINT": ["Asian Paints"], "SHRIRAMFIN": ["Shriram Finance"], "ULTRACEMCO": ["UltraTech"],
     "HDFCLIFE": ["HDFC Life"], "SBILIFE": ["SBI Life"], "BAJFINANCE": ["Bajaj Finance"], "BAJAJFINSV": ["Bajaj Finserv"],
     "KOTAKBANK": ["Kotak Mahindra Bank", "Kotak Bank"], "MARUTI": ["Maruti Suzuki", "Maruti"], "EICHERMOT": ["Eicher Motors", "Royal Enfield"],
+}
+NEWS_FILTER = {  # headline must match one of these (a bare 'Eternal' is usually not about the company)
+    "ETERNAL": [re.compile(r"\bEternal\b(?=\s+(?:Ltd|Limited|shares?|stock|share price|Q[1-4]|results?|and Swiggy|CEO))", re.I),
+                re.compile(r"\b(?:Zomato|Blinkit)\b", re.I)],
 }
 INDICES = {"NIFTY 50": "NSE_INDEX|Nifty 50", "BANK NIFTY": "NSE_INDEX|Nifty Bank", "INDIA VIX": "NSE_INDEX|India VIX"}
 MCX = [("CRUDEOIL", "CRUDE"), ("NATURALGAS", "NAT GAS"), ("GOLD", "GOLD"), ("SILVER", "SILVER"), ("COPPER", "COPPER"),
@@ -135,7 +139,7 @@ MODEL_GROUPS = [  # the information groups the prediction model uses (shown whil
 
 STATE = {"universe": None, "instr": None, "instr_date": None, "deliv": {}, "deliv_days": 0, "part": None,
          "errors": {}, "upstox_ok": None, "upstox_latency_ms": None, "token": "not set" if not TOKEN else "unverified",
-         "nlp": "loading", "ready": False, "boot_msg": "starting"}
+         "nlp": "loading", "ready": False, "boot_msg": "starting", "feed": None, "feed_src": None, "feed_mtime": None}
 
 
 def log(msg: str) -> None:
@@ -181,7 +185,8 @@ def _expiry(ms) -> date | None:
 def load_instruments() -> dict:
     """Upstox instrument master (public file, refreshed daily): equity keys, F&O expiries and futures, MCX futures."""
     today = datetime.now(IST).date()
-    out = {"eq": {}, "name": {}, "opt_exp": defaultdict(set), "fut": defaultdict(list), "mcx": defaultdict(list)}
+    out = {"eq": {}, "name": {}, "opt_exp": defaultdict(set), "fut": defaultdict(list), "mcx": defaultdict(list),
+           "idx": {}, "idx_opt": defaultdict(set), "idx_lot": {}}
     import ijson
     for exch in ("NSE", "MCX"):
         f = CACHE_DIR / f"instr_{exch}_{today:%Y%m%d}.json.gz"
@@ -217,6 +222,17 @@ def _ingest(data, out: dict, today: date) -> None:
                     out["opt_exp"][u].add(exp)
                 elif typ == "FUT":
                     out["fut"][u].append((exp, x.get("instrument_key")))
+            elif seg == "NSE_INDEX":
+                nm, k = x.get("name") or x.get("trading_symbol"), x.get("instrument_key")
+                if nm and k:
+                    out["idx"][nm] = k
+            elif seg == "NSE_FO" and x.get("underlying_type") == "INDEX" and typ in ("CE", "PE") and (
+                    x.get("underlying_symbol") == "NIFTY" or x.get("underlying_key") == INDICES["NIFTY 50"]):
+                exp = _expiry(x.get("expiry"))
+                if exp and exp >= today:
+                    out["idx_opt"]["NIFTY"].add(exp)
+                    if x.get("lot_size"):
+                        out["idx_lot"].setdefault(exp, int(x["lot_size"]))
             elif seg == "MCX_FO" and typ == "FUT":
                 u, exp = (x.get("underlying_symbol") or x.get("name") or "").upper(), _expiry(x.get("expiry"))
                 if exp and exp >= today and u in dict(MCX):
@@ -242,7 +258,7 @@ def _nse_get(path: str) -> str | None:
 
 def load_delivery(n_sessions: int = 20) -> tuple[dict, int]:
     """Delivery % for the last n sessions from NSE's full bhavcopy (end-of-day, public)."""
-    out, got, d = defaultdict(list), 0, datetime.now(IST).date()
+    out, got, d, seen = defaultdict(list), 0, datetime.now(IST).date(), set()
     for _ in range(40):
         if got >= n_sessions:
             break
@@ -253,15 +269,25 @@ def load_delivery(n_sessions: int = 20) -> tuple[dict, int]:
                 f.write_text(txt)
                 lines = txt.splitlines()
                 head = [h.strip().upper() for h in lines[0].split(",")]
+                rows, file_day = [], None
                 for ln in lines[1:]:
                     v = dict(zip(head, [x.strip() for x in ln.split(",")]))
                     if v.get("SERIES") == "EQ":
                         try:
+                            file_day = file_day or datetime.strptime(v.get("DATE1", ""), "%d-%b-%Y").date()
+                        except ValueError:
+                            pass
+                        try:
                             pct = float(v.get("DELIV_PER", "nan"))
                         except ValueError:
                             pct = float("nan")
-                        out[v.get("SYMBOL")].append((d.isoformat(), pct))
-                got += 1
+                        rows.append((v.get("SYMBOL"), pct))
+                day = file_day or d
+                if day.isoformat() not in seen:              # same session served under a holiday's name: skip
+                    seen.add(day.isoformat())
+                    for sym, pct in rows:
+                        out[sym].append((day.isoformat(), pct))
+                    got += 1
         d -= timedelta(days=1)
     for k in out:
         out[k].sort()
@@ -391,7 +417,11 @@ def parse_quote(v: dict) -> dict:
         t = datetime.fromtimestamp(int(ltt) / 1000, IST).strftime("%H:%M:%S") if ltt else None
     except Exception:  # noqa: BLE001
         t = None
-    return {"ltp": ltp, "chg": chg, "pct": (chg / prev * 100) if prev else 0.0, "prev": prev,
+    try:
+        ltt_ms = int(ltt) if ltt else None
+    except (TypeError, ValueError):
+        ltt_ms = None
+    return {"ltp": ltp, "chg": chg, "pct": (chg / prev * 100) if prev else 0.0, "prev": prev, "ltt": ltt_ms,
             "open": o.get("open"), "high": o.get("high"), "low": o.get("low"), "vwap": v.get("average_price") or None,
             "volume": v.get("volume") or 0, "oi": v.get("oi") or 0, "time": t,
             "upper": v.get("upper_circuit_limit"), "lower": v.get("lower_circuit_limit")}
@@ -477,6 +507,38 @@ def chain_metrics(rows: list[dict], spot: float | None) -> dict:
             "call_oi_chg": sum(s["c_oi"] - s["c_prev"] for s in strikes), "put_oi_chg": sum(s["p_oi"] - s["p_prev"] for s in strikes),
             "profile": [{"k": s["k"], "c_oi": s["c_oi"], "p_oi": s["p_oi"], "c_chg": s["c_oi"] - s["c_prev"],
                          "p_chg": s["p_oi"] - s["p_prev"], "atm": s is atm} for s in strikes[lo:hi]]}
+
+
+async def _prev_oi(key: str, today: date) -> float | None:
+    """Open interest at the previous close (daily futures candles carry OI)."""
+    fd = await cached(f"futd:{key}:{today}", 3600, lambda: history(key, "days", 1, today - timedelta(days=10), today))
+    return next((c[6] for c in reversed(fd) if c[0] < _today_start_ms() and c[6]), None)
+
+
+def futures_metrics(q: dict, futs: list, fq: dict, prev_oi: dict, today: date, roll_days: int = 2) -> dict:
+    """Open-interest change, price/OI build-up, annualised basis and rollover. In the last `roll_days` days before
+    the near-month expiry, positions move to the next month, so the near month alone shows a false 'long unwinding':
+    OI change then uses near + next month combined, and the basis uses the next month."""
+    near_exp, near = futs[0][0], futs[0][1]
+    nxt_exp, nxt = (futs[1][0], futs[1][1]) if len(futs) > 1 else (None, None)
+    nq, xq = fq.get(near) or {}, (fq.get(nxt) or {}) if nxt else {}
+    near_dte = (near_exp - today).days
+    rolling = bool(nxt) and near_dte <= roll_days
+    out = {"near_dte": near_dte, "oi_combined": rolling, "basis_month": "next" if rolling and xq.get("ltp") else "near"}
+    if rolling:
+        now_oi = (nq.get("oi") or 0) + (xq.get("oi") or 0)
+        before = (prev_oi.get(near) or 0) + (prev_oi.get(nxt) or 0)
+    else:
+        now_oi, before = nq.get("oi") or 0, prev_oi.get(near) or 0
+    if now_oi and before:
+        out["oi_chg_pct"] = (now_oi / before - 1) * 100
+        out["buildup"] = buildup(q["pct"], out["oi_chg_pct"])
+    bq, bexp = (xq, nxt_exp) if out["basis_month"] == "next" else (nq, near_exp)
+    if bq.get("ltp") and q.get("ltp"):
+        out["basis_ann"] = (bq["ltp"] / q["ltp"] - 1) * 365 / max((bexp - today).days, 1) * 100
+    if nxt and xq.get("oi") and nq.get("oi"):
+        out["rollover"] = xq["oi"] / (xq["oi"] + nq["oi"]) * 100
+    return out
 
 
 def rsi(closes: list[float], n: int = 14) -> float | None:
@@ -569,7 +631,7 @@ def signals(sym: str, q: dict, daily: list, chain: dict, deliv: list, fut: dict,
     else:
         out.append(("ATM IV", f"{iv:.1f}%" if iv else "—", "neutral"))
     if news_avg is not None:
-        out.append(("NEWS", f"{news_avg:+.2f} FinBERT · {'positive' if news_avg > 0.15 else 'negative' if news_avg < -0.15 else 'neutral'}",
+        out.append(("NEWS", f"{news_avg:+.2f} {'FinBERT' if _finbert is not None else 'word list'} · {'positive' if news_avg > 0.15 else 'negative' if news_avg < -0.15 else 'neutral'}",
                     "bull" if news_avg > 0.15 else "bear" if news_avg < -0.15 else "neutral"))
     else:
         out.append(("NEWS", "no recent headlines", "neutral"))
@@ -585,6 +647,15 @@ def signals(sym: str, q: dict, daily: list, chain: dict, deliv: list, fut: dict,
     else:
         out.append(("FII INDEX FUT", "—", "neutral"))
     return [{"name": a, "value": b, "tone": c} for a, b, c in out]
+
+
+def quote_is_today(q: dict | None) -> bool:
+    """True when the quote's last trade happened today (IST). On weekends, holidays and before the open Upstox keeps
+    the last session's prices, which must not be drawn as a candle for today."""
+    t = (q or {}).get("ltt")
+    if not t:
+        return False
+    return datetime.fromtimestamp(t / 1000, IST).date() == datetime.now(IST).date()
 
 
 def _today_start_ms() -> float:
@@ -639,6 +710,7 @@ async def lifespan(_app):
     threading.Thread(target=_boot, daemon=True).start()
     threading.Thread(target=_load_finbert, daemon=True).start()
     threading.Thread(target=_daily_refresh, daemon=True).start()
+    threading.Thread(target=_feed_loop, daemon=True).start()
     yield
     await _client.aclose()
 
@@ -799,7 +871,7 @@ def _health() -> dict:
     return {"version": VERSION, "mode": "DEMO" if DEMO else "LIVE", "token": STATE["token"], "upstox_ok": STATE["upstox_ok"],
             "latency_ms": STATE["upstox_latency_ms"], "instruments": STATE["instr_date"], "stocks": len(_universe()),
             "delivery_sessions": STATE["deliv_days"], "fii": (STATE["part"] or {}).get("date"), "nlp": STATE["nlp"],
-            "errors": dict(STATE["errors"]), "boot": STATE["boot_msg"]}
+            "errors": dict(STATE["errors"]), "boot": STATE["boot_msg"], "feed": _feed_meta()}
 
 
 @app.get("/api/snapshot")
@@ -833,7 +905,8 @@ async def _news(sym: str) -> list:
     r = await _client.get(url, headers=BROWSER, timeout=15)
     root = ET.fromstring(r.content)
     items = []
-    pats = [re.compile(r"\b" + re.escape(n) + r"\b", 0 if (n.isupper() and len(n) <= 4) else re.I) for n in names]
+    pats = NEWS_FILTER.get(sym) or [re.compile(r"\b" + re.escape(n) + r"\b", 0 if (n.isupper() and len(n) <= 4) else re.I)
+                                    for n in names]
     for it in root.iter("item"):
         title = (it.findtext("title") or "").strip()
         src = (it.findtext("source") or "").strip()
@@ -890,7 +963,7 @@ async def _candles_for(key: str, tf: str, q: dict) -> list:
         days_ = sorted({datetime.fromtimestamp(r[0] / 1000, IST).date() for r in rows})[-5:]
         return [r for r in rows if datetime.fromtimestamp(r[0] / 1000, IST).date() in days_]
     d = [r for r in await daily_1y(key) if r[0] < _today_start_ms()]
-    if q.get("open"):
+    if quote_is_today(q) and q.get("open"):
         d = d + [[_today_start_ms(), q["open"], q["high"], q["low"], q["ltp"], q["volume"], 0]]
     return d[-63:] if tf == "3m" else d[-250:]
 
@@ -945,19 +1018,7 @@ async def api_stock(sym: str, tf: str = "5m"):
                 return {}
             near, nxt = futs[0][1], (futs[1][1] if len(futs) > 1 else None)
             fq = await quotes([k for k in (near, nxt) if k])
-            nq = fq.get(near) or {}
-            out = {}
-            fd = await cached(f"futd:{near}:{today}", 3600, lambda: history(near, "days", 1, today - timedelta(days=10), today))
-            prev_oi = next((c[6] for c in reversed(fd) if c[0] < _today_start_ms() and c[6]), None)
-            if nq.get("oi") and prev_oi:
-                out["oi_chg_pct"] = (nq["oi"] / prev_oi - 1) * 100
-                out["buildup"] = buildup(q["pct"], out["oi_chg_pct"])
-            fdte = max((futs[0][0] - today).days, 1)
-            if nq.get("ltp") and q["ltp"]:
-                out["basis_ann"] = (nq["ltp"] / q["ltp"] - 1) * 365 / fdte * 100
-            if nxt and fq.get(nxt, {}).get("oi") and nq.get("oi"):
-                out["rollover"] = fq[nxt]["oi"] / (fq[nxt]["oi"] + nq["oi"]) * 100
-            return out
+            return futures_metrics(q, futs, fq, {k: await _prev_oi(k, today) for k in (near, nxt) if k}, today)
         res = await asyncio.gather(_candles_for(key, tf, q), daily_1y(key), cached(f"chain:{sym}:{expiry}", 30, get_chain),
                                    cached(f"fut:{sym}", 15, get_fut), return_exceptions=True)
         candles, daily, chain, fut = [x if not isinstance(x, Exception) else ([] if i < 2 else {}) for i, x in enumerate(res)]
@@ -986,3 +1047,356 @@ async def api_stock(sym: str, tf: str = "5m"):
     return {"sym": sym, "name": row["name"], "group": row["group"], "quote": q, "tf": tf, "candles": candles, "levels": levels,
             "chain": chain, "expiry": expiry, "dte": dte, "fut": fut, "deliv": deliv[-20:], "fii": STATE["part"],
             "signals": sig, "health": _health()}
+
+
+# ===================================================================================================== live-2.0
+# ---- nightly feed (built in Colab after each close; see the module docstring)
+IDX_COLS = ["index", "last", "pct", "open", "high", "low", "prev", "yearHigh", "yearLow", "pe", "pb", "dy", "adv", "dec",
+            "unch", "chg365", "chg30", "weekAgo"]
+
+
+def _num(x):
+    try:
+        v = float(str(x).replace(",", ""))
+        return v if math.isfinite(v) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def load_feed() -> None:
+    """Read the nightly feed from FEED_URL (if set) or FEED_PATH. Keeps the last good copy on any failure and never
+    goes back to an older build."""
+    try:
+        if FEED_URL:
+            h = dict(BROWSER)
+            if FEED_TOKEN:
+                h["Authorization"] = f"Bearer {FEED_TOKEN}"
+            r = httpx.get(FEED_URL, headers=h, timeout=30, follow_redirects=True)
+            r.raise_for_status()
+            j, src = r.json(), "url"
+        elif FEED_PATH.exists():
+            m = FEED_PATH.stat().st_mtime
+            if m == STATE["feed_mtime"] and STATE["feed"]:
+                return
+            j, src = json.loads(FEED_PATH.read_text(encoding="utf-8")), "file"
+            STATE["feed_mtime"] = m
+        else:
+            STATE["errors"]["feed"] = "nightly data not connected yet"
+            return
+        if not (isinstance(j, dict) and j.get("schema") == FEED_SCHEMA and j.get("built_at")):
+            raise ValueError("not a terminal feed")
+        old = STATE["feed"]
+        if old and str(old.get("built_at", "")) > str(j["built_at"]):
+            return
+        STATE["feed"], STATE["feed_src"] = j, src
+        STATE["errors"].pop("feed", None)
+        _cache.pop("market", None)
+    except Exception as e:  # noqa: BLE001
+        STATE["errors"]["feed"] = f"nightly data unavailable ({type(e).__name__})"
+
+
+def _feed_loop() -> None:
+    while True:
+        load_feed()
+        time.sleep(600)
+
+
+def _feed_meta() -> dict:
+    f = STATE["feed"] or {}
+    return {"built_at": f.get("built_at"), "session": f.get("session"), "src": STATE["feed_src"],
+            "code_version": f.get("code_version")}
+
+
+# ---- index names: NSE's full names (feed) vs Upstox's short names (instrument master)
+_IDX_ABBR = [("FINANCIAL SERVICES", "FIN SERVICE"), ("PRIVATE BANK", "PVT BANK"), ("SMALLCAP", "SMLCAP"),
+             ("CONSUMER DURABLES", "CONSR DURBL"), ("INFRASTRUCTURE", "INFRA"), ("SERVICES SECTOR", "SERV SECTOR"),
+             ("INDIA DEFENCE", "IND DEFENCE"), ("CAPITAL MARKETS", "CAPITAL MKT"), ("HEALTHCARE INDEX", "HEALTHCARE"),
+             ("INDIA CONSUMPTION", "CONSUMPTION"), ("MIDCAP SELECT", "MID SELECT"), ("&", " AND ")]
+
+
+def norm_index(name: str) -> str:
+    s = " ".join(str(name).upper().replace("&", " & ").split())
+    for full, ab in _IDX_ABBR:
+        s = s.replace(full, ab)
+    return re.sub(r"[^A-Z0-9]", "", s)
+
+
+def index_key(name: str) -> str | None:
+    if name in ("NIFTY 50", "NIFTY BANK", "INDIA VIX"):
+        return {"NIFTY 50": INDICES["NIFTY 50"], "NIFTY BANK": INDICES["BANK NIFTY"], "INDIA VIX": INDICES["INDIA VIX"]}[name]
+    idx = (STATE["instr"] or {}).get("idx") or {}
+    m = STATE.setdefault("_idx_norm", {})
+    if len(m) != len(idx):
+        m.clear()
+        m.update({norm_index(k): v for k, v in idx.items()})
+    return m.get(norm_index(name))
+
+
+def overlay_index_row(row: list, q: dict) -> list:
+    """End-of-day index row (IDX_COLS order) + live quote -> live row. Valuation ratios move with the price
+    (earnings and book value do not change intraday); 30/365-day changes keep their base price."""
+    d = dict(zip(IDX_COLS, row))
+    last0, ltp = _num(d.get("last")), q.get("ltp")
+    if not ltp:
+        return list(row[:len(IDX_COLS)]) + ["eod"]
+    d.update(last=ltp, pct=round(q["pct"], 2), prev=q["prev"], open=q.get("open") or d.get("open"),
+             high=q.get("high") or d.get("high"), low=q.get("low") or d.get("low"))
+    if q.get("high") and _num(d.get("yearHigh")):
+        d["yearHigh"] = max(_num(d["yearHigh"]), q["high"])
+    if q.get("low") and _num(d.get("yearLow")):
+        d["yearLow"] = min(_num(d["yearLow"]), q["low"])
+    if last0:
+        f = ltp / last0
+        for k in ("chg365", "chg30"):
+            if _num(d.get(k)) is not None:
+                d[k] = round(((1 + _num(d[k]) / 100) * f - 1) * 100, 2)
+        for k in ("pe", "pb"):
+            if _num(d.get(k)):
+                d[k] = round(_num(d[k]) * f, 2)
+        if _num(d.get("dy")):
+            d["dy"] = round(_num(d["dy"]) / f, 2)
+    return [d.get(c) for c in IDX_COLS] + ["live"]
+
+
+# ---- Nifty option chain (Upstox reports open interest and volume in units; NSE and this page use contracts)
+def nifty_oc_summary(rows: list, expiry: date, lot: int | None, now: datetime) -> dict | None:
+    st = []
+    div = float(lot or 1)
+    spot = None
+    for r in rows or []:
+        c, p = r.get("call_options") or {}, r.get("put_options") or {}
+        cm, pm = c.get("market_data") or {}, p.get("market_data") or {}
+        cg, pg = c.get("option_greeks") or {}, p.get("option_greeks") or {}
+        spot = spot or r.get("underlying_spot_price")
+        st.append({"k": float(r["strike_price"]), "c_oi": (cm.get("oi") or 0) / div, "p_oi": (pm.get("oi") or 0) / div,
+                   "c_prev": (cm.get("prev_oi") or 0) / div, "p_prev": (pm.get("prev_oi") or 0) / div,
+                   "c_vol": (cm.get("volume") or 0) / div, "p_vol": (pm.get("volume") or 0) / div,
+                   "c_iv": cg.get("iv") or 0, "p_iv": pg.get("iv") or 0})
+    st.sort(key=lambda x: x["k"])
+    if not st or not spot:
+        return None
+    c_oi, p_oi = sum(x["c_oi"] for x in st), sum(x["p_oi"] for x in st)
+    c_vol, p_vol = sum(x["c_vol"] for x in st), sum(x["p_vol"] for x in st)
+    pain = min(st, key=lambda K: sum(x["c_oi"] * max(0.0, K["k"] - x["k"]) + x["p_oi"] * max(0.0, x["k"] - K["k"]) for x in st))["k"]
+    atm = min(st, key=lambda x: abs(x["k"] - spot))
+    top = lambda side: [[x["k"], round(x[f"{side}_oi"]), round(x[f"{side}_oi"] - x[f"{side}_prev"])]
+                        for x in sorted(st, key=lambda x: -x[f"{side}_oi"])[:3]]
+    return {"ts": now.strftime("%d-%b-%Y %H:%M:%S"), "expiry": expiry.strftime("%d-%b-%Y"), "spot": spot, "src": "live",
+            "pcr_oi": round(p_oi / c_oi, 3) if c_oi else None, "pcr_vol": round(p_vol / c_vol, 3) if c_vol else None,
+            "oi_call": round(c_oi), "oi_put": round(p_oi), "chg_call": round(sum(x["c_oi"] - x["c_prev"] for x in st)),
+            "chg_put": round(sum(x["p_oi"] - x["p_prev"] for x in st)), "max_pain": pain, "atm": atm["k"],
+            "atm_civ": atm["c_iv"], "atm_piv": atm["p_iv"], "topC": top("c"), "topP": top("p"),
+            "near": [[x["k"], round(x["p_oi"]), round(x["c_oi"])] for x in st if abs(x["k"] - atm["k"]) <= 600]}
+
+
+async def _nifty_oc() -> dict | None:
+    ins = STATE["instr"] or {}
+    now = datetime.now(IST)
+    exps = sorted(e for e in ins.get("idx_opt", {}).get("NIFTY", ())
+                  if e > now.date() or (e == now.date() and now.hour * 60 + now.minute < 930))
+    if not exps:
+        return None
+    rows = await upx("/v2/option/chain", {"instrument_key": INDICES["NIFTY 50"], "expiry_date": exps[0].isoformat()})
+    return nifty_oc_summary(rows or [], exps[0], (ins.get("idx_lot") or {}).get(exps[0]), now)
+
+
+# ---- global markets (Yahoo Finance chart data)
+GLOBAL = [("^DJI", "Dow Jones"), ("^GSPC", "S&P 500"), ("^IXIC", "Nasdaq"), ("^FTSE", "FTSE 100"), ("^GDAXI", "DAX"),
+          ("^N225", "Nikkei 225"), ("^HSI", "Hang Seng"), ("000001.SS", "Shanghai"), ("^KS11", "Kospi"),
+          ("^TNX", "US 10Y yield"), ("DX-Y.NYB", "Dollar index"), ("INR=X", "USD/INR"), ("BZ=F", "Brent crude"),
+          ("GC=F", "Gold"), ("ES=F", "S&P futures")]
+
+
+def yahoo_row(sym: str, name: str, j: dict) -> list | None:
+    """[sym, name, last, previous close, last time (ISO), currency, last 22 closes]. The previous close is the last
+    daily close before the day of the latest price (Yahoo's own field differs between endpoints)."""
+    x = j["chart"]["result"][0]
+    m, ts = x["meta"], x.get("timestamp") or []
+    closes = (x.get("indicators", {}).get("quote") or [{}])[0].get("close") or []
+    pairs = [(t, c) for t, c in zip(ts, closes) if c is not None]
+    if not pairs:
+        return None
+    tz = ZoneInfo(m.get("exchangeTimezoneName") or "UTC")
+    day = lambda t: datetime.fromtimestamp(t, tz).date()
+    last, t_last = m.get("regularMarketPrice") or pairs[-1][1], m.get("regularMarketTime") or pairs[-1][0]
+    prior = [c for t, c in pairs if day(t) < day(t_last)]
+    prev = prior[-1] if prior else m.get("chartPreviousClose")
+    if not prev:
+        return None
+    return [sym, name, float(last), float(prev), datetime.fromtimestamp(t_last, ZoneInfo("UTC")).isoformat().replace("+00:00", "Z"),
+            m.get("currency"), [round(float(c), 4) for _, c in pairs][-22:]]
+
+
+async def _global() -> list:
+    async def one(sym, name):
+        r = await _client.get(f"{YAHOO}/{quote(sym, safe='')}", params={"range": "2mo", "interval": "1d"}, headers=BROWSER, timeout=12)
+        r.raise_for_status()
+        return yahoo_row(sym, name, r.json())
+    res = await asyncio.gather(*(one(s, n) for s, n in GLOBAL), return_exceptions=True)
+    live = {x[0]: x for x in res if isinstance(x, list)}
+    feed = {x[0]: x for x in (((STATE["feed"] or {}).get("global") or {}).get("g") or [])}
+    return [live.get(s) or feed.get(s) for s, _ in GLOBAL if live.get(s) or feed.get(s)]
+
+
+# ---- market headlines (major financial publishers only)
+CREDIBLE = ("economic times", "et markets", "et now", "moneycontrol", "business standard", "mint", "livemint", "businessline",
+            "hindu businessline", "reuters", "bloomberg", "cnbc", "ndtv profit", "financial express", "business today",
+            "the hindu", "fortune india", "the economist", "financial times", "wall street journal", "press trust of india",
+            "pib", "reserve bank of india", "nse", "bse")
+MARKET_Q = '(Sensex OR Nifty OR "Dalal Street" OR "stock market" OR RBI OR FPI OR "rupee") when:2d'
+
+
+def credible(source: str) -> bool:
+    s = (source or "").lower()
+    return any(c == s or s.startswith(c) or s.startswith("the " + c) or c in s.split(" - ")[0] for c in CREDIBLE)
+
+
+def parse_market_rss(content: bytes, limit: int = 15) -> list:
+    root = ET.fromstring(content)
+    items, seen = [], set()
+    for it in root.iter("item"):
+        title = (it.findtext("title") or "").strip()
+        src = (it.findtext("source") or "").strip()
+        if src and title.endswith(" - " + src):
+            title = title[: -len(src) - 3]
+        if not credible(src):
+            continue
+        try:
+            ts = parsedate_to_datetime(it.findtext("pubDate"))
+        except Exception:  # noqa: BLE001
+            continue
+        k = re.sub(r"[^a-z0-9]", "", title.lower())[:60]
+        if k in seen:
+            continue
+        seen.add(k)
+        items.append([ts.astimezone(ZoneInfo("UTC")).isoformat().replace("+00:00", "Z"), title, src])
+    items.sort(key=lambda x: x[0], reverse=True)
+    return items[:limit]
+
+
+async def _market_news() -> list:
+    r = await _client.get(f"{NEWS_RSS}?q={quote_plus(MARKET_Q)}&hl=en-IN&gl=IN&ceid=IN:en", headers=BROWSER, timeout=15)
+    r.raise_for_status()
+    return parse_market_rss(r.content)
+
+
+# ---- Nifty 500 breadth (live, from the constituent list in the feed)
+N500_MIN = int(os.environ.get("N500_MIN", "400"))      # fewer live quotes than this: keep the end-of-day count
+async def _n500_breadth() -> list | None:
+    syms = (STATE["feed"] or {}).get("n500") or []
+    eq = (STATE["instr"] or {}).get("eq") or {}
+    keys = [eq[s] for s in syms if s in eq]
+    if len(keys) < N500_MIN:
+        return None
+    qq = await quotes(keys)
+    pcts = [x["pct"] for x in qq.values() if x.get("ltp") and quote_is_today(x)]
+    if len(pcts) < N500_MIN:
+        return None
+    return [sum(p > 0 for p in pcts), sum(p < 0 for p in pcts), sum(p == 0 for p in pcts)]
+
+
+async def _market() -> dict:
+    feed = STATE["feed"] or {}
+    ind = feed.get("indices") or {}
+    cols = ind.get("cols") or IDX_COLS
+    rows = [[r[cols.index(c)] if c in cols and cols.index(c) < len(r) else None for c in IDX_COLS] for r in ind.get("idx") or []]
+    out = {"feed": _feed_meta(), "ts": ind.get("ts"), "cols": IDX_COLS + ["src"], "fiidii": feed.get("fiidii"),
+           "events": feed.get("events"), "holidays": feed.get("holidays"), "nifty_oc": feed.get("nifty_oc"),
+           "news": feed.get("news") or [], "global": ((feed.get("global") or {}).get("g") or [])}
+    q = feed.get("quotes") or {}
+    qc = q.get("cols") or []
+    out["quotes"] = [{**dict(zip(qc, r)), "ffmc": dict(zip(qc, r)).get("ffmcCr")} for r in q.get("q") or []]
+    out["fii_long"] = (STATE["part"] or {}).get("long_share", feed.get("fii_long"))
+    if DEMO:
+        out["indices"] = [r + ["eod"] for r in rows]
+        return out
+    keys = {r[0]: index_key(r[0]) for r in rows}
+    tasks = [quotes([k for k in set(keys.values()) if k]), _nifty_oc(), _global(), _market_news(), _n500_breadth(),
+             cached("snapshot", 3, _snapshot)]
+    iq, oc, gl, news, b500, snap = await asyncio.gather(*tasks, return_exceptions=True)
+    for name, x in (("index quotes", iq), ("nifty options", oc), ("global markets", gl), ("market news", news), ("breadth", b500)):
+        if isinstance(x, Exception):
+            STATE["errors"][f"market: {name}"] = f"{type(x).__name__}: {str(x)[:100]}"
+        else:
+            STATE["errors"].pop(f"market: {name}", None)
+    iq = iq if isinstance(iq, dict) else {}
+    live_rows = []
+    for r in rows:
+        qq = iq.get(keys.get(r[0]))
+        live_rows.append(overlay_index_row(r, qq) if qq and quote_is_today(qq) else r + ["eod"])
+    if isinstance(snap, dict):
+        b = snap.get("breadth") or {}
+        for r in live_rows:
+            if r[0] == "NIFTY 50" and r[-1] == "live":
+                r[12], r[13], r[14] = b.get("up"), b.get("down"), max(0, len(snap.get("stocks") or []) - b.get("up", 0) - b.get("down", 0))
+    if isinstance(b500, list):
+        for r in live_rows:
+            if r[0] == "NIFTY 500":
+                r[12], r[13], r[14] = b500
+    out["indices"] = live_rows
+    if any(r[-1] == "live" for r in live_rows):
+        out["ts"] = datetime.now(IST).strftime("%d-%b-%Y %H:%M")
+    if isinstance(oc, dict):
+        out["nifty_oc"] = oc
+    if isinstance(gl, list) and gl:
+        out["global"] = gl
+    if isinstance(news, list) and news:
+        out["news"] = news
+    return out
+
+
+@app.get("/api/market")
+async def api_market():
+    if not STATE["ready"]:
+        return JSONResponse({"loading": True}, status_code=503)
+    ttl = 30 if market_phase_by_clock() != "CLOSED" else 300
+    try:
+        return await cached("market", ttl, _market)
+    except Exception as e:  # noqa: BLE001
+        STATE["errors"]["market"] = f"{type(e).__name__}: {str(e)[:120]}"
+        hit = _cache.get("market")
+        return hit[1] if hit else JSONResponse({"error": STATE["errors"]["market"]}, status_code=503)
+
+
+# ---- daily candles for the stock page (3 months; every stock gets open/high/low/close)
+def daily_payload(rows: list, q: dict | None, n: int = 63) -> dict:
+    """Completed sessions from the daily history plus today's session from the live quote (only when the quote is
+    from today). dates/c/v (volume in lakh shares) and ohlc [ms, o, h, l, c, volume] of the same length."""
+    t0 = _today_start_ms()
+    d = [r for r in rows if r[0] < t0]
+    partial = False
+    if q and quote_is_today(q) and q.get("open"):
+        o, c = q["open"], q["ltp"]
+        d.append([t0, o, max(q.get("high") or c, o, c), min(q.get("low") or c, o, c), c, q.get("volume") or 0, 0])
+        partial = market_phase_by_clock() != "CLOSED"
+    d = d[-n:]
+    return {"dates": [datetime.fromtimestamp(r[0] / 1000, IST).date().isoformat() for r in d], "c": [r[4] for r in d],
+            "v": [round((r[5] or 0) / 1e5, 4) for r in d], "ohlc": [[r[0], r[1], r[2], r[3], r[4], r[5]] for r in d],
+            "partial": partial}
+
+
+@app.get("/api/daily/{sym}")
+async def api_daily(sym: str):
+    if not STATE["ready"]:
+        return JSONResponse({"loading": True}, status_code=503)
+    row = next((r for r in _universe() if r["sym"] == sym), None)
+    if not row:
+        return JSONResponse({"error": "unknown symbol"}, status_code=404)
+    snap = await cached("snapshot", 3, _snapshot)
+    q = snap["_quotes"].get(sym)
+    if DEMO:
+        rows = demo_candles(f"{sym}d{datetime.now(IST).date()}", 80, _today_start_ms() - 80 * 86400e3, 86400e3, (q or {}).get("prev") or 1000)
+    else:
+        try:
+            rows = await daily_1y(instrument_key(row))
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": f"daily candles unavailable ({type(e).__name__})"}, status_code=503)
+    return {"sym": sym, **daily_payload(rows, q)}
+
+
+@app.get("/api/model")
+async def api_model():
+    m = (STATE["feed"] or {}).get("model")
+    if not m or not m.get("stocks"):
+        return {"stocks": None, "note": "The model's calls appear here after the first recorded day."}
+    return m

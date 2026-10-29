@@ -17,8 +17,17 @@ SYMS = ["HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK", "BAJFINANCE", 
         "SUNPHARMA", "CIPLA", "DRREDDY", "APOLLOHOSP", "MAXHEALTH", "TATASTEEL", "JSWSTEEL", "HINDALCO", "ULTRACEMCO", "GRASIM", "LT",
         "ADANIENT", "ADANIPORTS", "BEL", "INDIGO", "BHARTIARTL"]
 ISIN = {s: f"INE{i:03d}A01010" for i, s in enumerate(SYMS)}
+HOLIDAY = (datetime.now(IST) - timedelta(days=8)).date()
+while HOLIDAY.weekday() >= 5:
+    HOLIDAY -= timedelta(days=1)
 PRICE = {s: 200 + (i * 137) % 4800 for i, s in enumerate(SYMS)}
 STATE = {"calls": [], "fail_token": False}
+# Upstox short names for the indices in the nightly feed (NSE's full names differ; 'Nifty Media' left out on purpose)
+UPSTOX_INDEX_NAMES = ["Nifty 50", "Nifty Next 50", "Nifty Bank", "Nifty Fin Service", "Nifty 100", "Nifty 500", "NIFTY MIDCAP 100",
+                      "NIFTY SMLCAP 100", "India VIX", "NIFTY MIDCAP 150", "Nifty Auto", "Nifty FMCG", "Nifty IT", "Nifty Metal",
+                      "Nifty Pharma", "Nifty PSU Bank", "Nifty Pvt Bank", "Nifty Realty", "NIFTY HEALTHCARE", "NIFTY CONSR DURBL",
+                      "NIFTY OIL AND GAS", "Nifty Commodities", "Nifty CPSE", "Nifty Energy", "Nifty Infra", "Nifty PSE",
+                      "NIFTY IND DEFENCE", "NIFTY CAPITAL MKT"]
 app = FastAPI()
 
 
@@ -56,6 +65,14 @@ def instruments(exch: str):
                 for t in ("CE", "PE"):
                     rows.append({"segment": "NSE_FO", "exchange": "NSE", "expiry": _exp_ms(exp1), "instrument_type": t, "underlying_symbol": s,
                                  "instrument_key": f"NSE_FO|O{i}{k}{t}", "underlying_type": "EQUITY", "strike_price": PRICE[s] + 20 * k})
+        for nm in UPSTOX_INDEX_NAMES:                                           # index keys use Upstox's short names
+            rows.append({"segment": "NSE_INDEX", "name": nm, "exchange": "NSE", "instrument_type": "INDEX",
+                         "instrument_key": f"NSE_INDEX|{nm}", "trading_symbol": nm.upper()})
+        for e in (today + timedelta(days=2), today + timedelta(days=9)):              # Nifty index options, lot 75
+            for t in ("CE", "PE"):
+                rows.append({"segment": "NSE_FO", "exchange": "NSE", "expiry": _exp_ms(e), "instrument_type": t, "underlying_symbol": "NIFTY",
+                             "underlying_key": "NSE_INDEX|Nifty 50", "instrument_key": f"NSE_FO|N{e:%m%d}{t}", "underlying_type": "INDEX",
+                             "strike_price": 25000.0, "lot_size": 75})
         rows.append({"segment": "NSE_FO", "exchange": "NSE", "expiry": _exp_ms(today - timedelta(days=3)), "instrument_type": "CE",
                      "underlying_symbol": "HDFCBANK", "instrument_key": "NSE_FO|OLD", "underlying_type": "EQUITY", "strike_price": 1})
     else:
@@ -140,15 +157,16 @@ def historical(key: str, unit: str, n: int, to_date: str, from_date: str):
 @app.get("/v2/option/chain")
 def chain(instrument_key: str, expiry_date: str):
     spot = _quote_price(instrument_key)
+    unit = 75 if instrument_key == "NSE_INDEX|Nifty 50" else 1
     rows = []
     for k in range(-6, 7):
         strike = round(spot / 20) * 20 + 20 * k
         rows.append({"expiry": expiry_date, "pcr": 1.1, "strike_price": strike, "underlying_key": instrument_key, "underlying_spot_price": spot,
-                     "call_options": {"instrument_key": "NSE_FO|1", "market_data": {"ltp": 10, "volume": 1000 + 100 * k, "oi": 100000 + 20000 * max(k, 0),
-                                                                                      "close_price": 9, "prev_oi": 90000},
+                     "call_options": {"instrument_key": "NSE_FO|1", "market_data": {"ltp": 10, "volume": (1000 + 100 * k) * unit, "oi": (100000 + 20000 * max(k, 0)) * unit,
+                                                                                      "close_price": 9, "prev_oi": 90000 * unit},
                                       "option_greeks": {"vega": 1, "theta": -1, "gamma": 0, "delta": 0.5, "iv": 22.0 + 0.2 * k, "pop": 50}},
-                     "put_options": {"instrument_key": "NSE_FO|2", "market_data": {"ltp": 10, "volume": 1200 - 100 * k, "oi": 110000 + 25000 * max(-k, 0),
-                                                                                     "close_price": 9, "prev_oi": 95000},
+                     "put_options": {"instrument_key": "NSE_FO|2", "market_data": {"ltp": 10, "volume": (1200 - 100 * k) * unit, "oi": (110000 + 25000 * max(-k, 0)) * unit,
+                                                                                     "close_price": 9, "prev_oi": 95000 * unit},
                                      "option_greeks": {"vega": 1, "theta": -1, "gamma": 0, "delta": -0.5, "iv": 23.0 - 0.3 * k, "pop": 50}}})
     return {"status": "success", "data": rows}
 
@@ -172,6 +190,8 @@ def bhav(fname: str):
     d = datetime.strptime(fname.split("_")[-1][:8], "%d%m%Y")
     if d.weekday() >= 5:
         return PlainTextResponse("not found", status_code=404)
+    if d.date() == HOLIDAY:
+        d = d - timedelta(days=1 if d.weekday() else 3)                             # previous session's content
     lines = ["SYMBOL, SERIES, DATE1, PREV_CLOSE, OPEN_PRICE, HIGH_PRICE, LOW_PRICE, LAST_PRICE, CLOSE_PRICE, AVG_PRICE, TTL_TRD_QNTY, "
              "TURNOVER_LACS, NO_OF_TRADES, DELIV_QTY, DELIV_PER"]
     for i, s in enumerate(SYMS):
@@ -187,9 +207,18 @@ def part(fname: str):
             "Client,100,200,1,1\nDII,50,60,1,1\nFII,30000,70000,1,1\nPro,10,10,1,1\nTOTAL,1,1,1,1\n")
 
 
+MARKET_ITEMS = [("Sensex, Nifty end higher as banks gain", "Moneycontrol", 1), ("Rupee steadies ahead of Fed decision", "Reuters", 2),
+                ("Nifty outlook: what to expect tomorrow", "Random Blog", 2),                         # not a major publisher: dropped
+                ("FPIs turn net buyers in October", "The Economic Times", 3), ("Sensex, Nifty end higher as banks gain", "Mint", 4)]
+
+
 @app.get("/rss")
 def rss(q: str = ""):
     now = datetime.now(IST)
+    if "Sensex" in q:
+        body = "".join(f"<item><title>{t} - {src}</title><pubDate>{(now - timedelta(hours=h)).strftime('%a, %d %b %Y %H:%M:%S %z')}</pubDate>"
+                       f"<source url='x'>{src}</source></item>" for t, src, h in MARKET_ITEMS)
+        return Response(f"<?xml version='1.0'?><rss><channel>{body}</channel></rss>", media_type="application/xml")
     items = [("HDFC Bank shares jump after strong Q2 profit growth", "Moneycontrol", 1),
              ("HDFC Bank faces RBI penalty over KYC lapses", "Economic Times", 3),
              ("Gail Smith obituary - Daily Herald", "Daily Herald", 2),                      # irrelevant: must be dropped
@@ -203,3 +232,17 @@ def rss(q: str = ""):
 async def control(request: Request):
     STATE.update(await request.json())
     return {"ok": True}
+
+
+@app.get("/yahoo/{sym}")
+def yahoo(sym: str):
+    if sym == "^KS11":
+        return JSONResponse({"chart": {"result": None, "error": {"code": "Not Found"}}}, status_code=404)   # falls back to the feed
+    now = datetime.now(IST)
+    days = [now - timedelta(days=i) for i in range(30, 0, -1)]
+    days = [d for d in days if d.weekday() < 5]
+    closes = [100 + i for i in range(len(days))]
+    return {"chart": {"result": [{"meta": {"currency": "USD", "regularMarketPrice": 150.0, "regularMarketTime": int(now.timestamp()),
+                                           "exchangeTimezoneName": "America/New_York", "chartPreviousClose": 90.0},
+                                  "timestamp": [int(d.replace(hour=16).timestamp()) for d in days],
+                                  "indicators": {"quote": [{"close": closes}]}}], "error": None}}
