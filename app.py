@@ -15,7 +15,7 @@ News        : Google News RSS (credible financial publishers only for market hea
 Environment variables (Render):
   UPSTOX_ANALYTICS_TOKEN  the Upstox Analytics Token (without it the page runs in clearly labelled DEMO mode)
   ACCESS_CODE             optional passcode that viewers must enter (recommended)
-  FEED_URL                where the nightly feed is published (optional; FEED_PATH, a file in this repo, otherwise)
+  FEED_URL                where the nightly feed is published (optional; defaults to the shared Drive file)
   FEED_TOKEN              read token for FEED_URL when it is private (optional)
 """
 from __future__ import annotations
@@ -58,7 +58,10 @@ NEWS_RSS = os.environ.get("NEWS_RSS", "https://news.google.com/rss/search")
 CACHE_DIR = Path(os.environ.get("CACHE_DIR", "/tmp/terminal_cache"))
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 FEED_PATH = Path(os.environ.get("FEED_PATH") or (HERE / "feed" / "terminal_feed.json"))
-FEED_URL = os.environ.get("FEED_URL", "").strip()
+# the nightly feed written by Cell 10 of 06_Update_All (Drive file shared as "anyone with the link can view"; public
+# market data and the recorded predictions only). FEED_URL overrides it; setting FEED_PATH alone uses that file instead.
+DEFAULT_FEED_URL = "https://drive.google.com/uc?export=download&id=1AILJZ7MWIuNYi1gBRSQNPh388L9kqXZ3"
+FEED_URL = os.environ.get("FEED_URL", "" if os.environ.get("FEED_PATH") else DEFAULT_FEED_URL).strip()
 FEED_TOKEN = os.environ.get("FEED_TOKEN", "").strip()
 FEED_SCHEMA = "terminal-feed/1"
 YAHOO = os.environ.get("YAHOO_CHART", "https://query1.finance.yahoo.com/v8/finance/chart").rstrip("/")
