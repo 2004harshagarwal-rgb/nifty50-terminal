@@ -20,8 +20,6 @@
   --mono:'IBM Plex Mono',ui-monospace,'Cascadia Mono',Consolas,monospace;
   --z:1;color-scheme:dark;
 }
-:root.lite{--bg:#E9EDF1;--panel:#FFFFFF;--panel2:#F3F5F8;--line:#D0D8E0;--grid:#E4E8ED;--text:#0C141F;--mute:#334155;--dim:#556373;
-  --up:#08835A;--dn:#C62E3B;--amb:#F5B83D;--amb-ink:#8A5B00;--on-amb:#120E06;--blue:#1C5CC0;--neu:#9BB0C5;--vio:#6A45C9;color-scheme:light}
 html{font-size:calc(var(--z) * clamp(12px, calc(0.36vw + 0.5vh + 3.6px), 22px));height:100%;-webkit-text-size-adjust:100%}
 *{box-sizing:border-box}
 body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:1rem;line-height:1.35;
@@ -46,10 +44,6 @@ nav.tabs .tsym{font-family:var(--mono);color:var(--amb-ink);margin-left:.4rem}
 .tools{margin-left:auto;display:flex;align-items:center;gap:.4rem}
 .pill{display:inline-flex;align-items:center;gap:.4rem;font-size:.78rem;white-space:nowrap;padding:0 .3rem}
 .dot{width:.45rem;height:.45rem;border-radius:50%;background:currentColor}
-.sep{width:1px;align-self:stretch;margin:.55rem .2rem;background:var(--line)}
-.ib{background:transparent;border:1px solid var(--line);border-radius:3px;height:1.75rem;min-width:1.9rem;padding:0 .45rem;font-size:.78rem;font-weight:600;cursor:pointer;color:var(--mute);display:inline-grid;place-items:center}
-.ib:hover{color:var(--text);border-color:var(--dim)}
-.ib[aria-pressed="true"]{background:var(--amb);color:var(--on-amb);border-color:var(--amb)}
 
 /* index ticker */
 .tape{position:relative;overflow:hidden;border-bottom:1px solid var(--line);height:1.85rem;display:flex;align-items:center;
@@ -71,6 +65,7 @@ main{min-height:0;padding-block:.5rem;display:grid;grid-template-rows:minmax(0,1
 .ph{display:flex;align-items:center;justify-content:space-between;gap:.6rem;padding:.3rem .6rem;border-bottom:1px solid var(--line);flex:0 0 auto;min-height:1.75rem}
 .ph h2{margin:0;font:600 .76rem var(--cond);letter-spacing:.08em;text-transform:uppercase;color:var(--mute);white-space:nowrap}
 .ph .tag{font-size:.68rem;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ph .tag.grow{flex:1 1 auto;min-width:0;text-align:right}
 .pb{padding:.4rem .6rem;min-height:0;flex:1 1 auto;overflow:hidden;position:relative}
 .empty{color:var(--dim);font-size:.82rem;padding:.5rem .1rem;line-height:1.5}
 .chip{display:inline-block;font:600 .62rem var(--sans);letter-spacing:.05em;border:1px solid var(--line);padding:0 .3rem;border-radius:2px;color:var(--blue);white-space:nowrap;vertical-align:middle}
@@ -113,7 +108,8 @@ main{min-height:0;padding-block:.5rem;display:grid;grid-template-rows:minmax(0,1
 #tmap{position:absolute;inset:.3rem .4rem .4rem;overflow:hidden}
 .tm{position:absolute;overflow:hidden;cursor:pointer;color:var(--text);border:1px solid var(--panel);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;line-height:1.15;padding:1px}
 .tm:hover{outline:2px solid var(--text);outline-offset:-2px;z-index:2}
-.tm b{font-family:var(--mono);font-weight:600;white-space:nowrap}
+.tm b{font-family:var(--cond);font-weight:700;white-space:nowrap;letter-spacing:.01em}
+.tm b.rot{writing-mode:vertical-rl;transform:rotate(180deg)}   /* tall, narrow tile: name reads bottom to top */
 .tm span{font-family:var(--mono);white-space:nowrap}
 .tg{position:absolute;font:600 .62rem var(--cond);letter-spacing:.06em;color:var(--mute);pointer-events:none;padding:0 3px;text-transform:uppercase;z-index:3;white-space:nowrap;overflow:hidden}
 .movers{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.22rem .6rem;align-items:center;font-size:.78rem;padding:.3rem .6rem}
@@ -227,14 +223,14 @@ footer{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-
   .col{grid-template-rows:none!important}
   .shead{grid-column:auto}
   .pb{overflow:visible}
-  #tmap{position:relative;inset:auto;height:24rem}
+  #tmap{position:relative;inset:auto;height:38rem}
   #chartbox{height:22rem;flex:none}
   .duo{grid-template-columns:minmax(0,1fr)}
   .nw .t{white-space:normal}
   .rd{grid-template-columns:repeat(3,minmax(0,1fr))}
 }
 @media (max-width:600px){
-  .tools .feed,.tools .sep{display:none}
+  .tools .feed{display:none}
   .glob,.secgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .hstats{grid-template-columns:repeat(2,auto);margin-left:0}
   .rd,.val,.pgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -253,11 +249,6 @@ footer{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-
     <span class="pill" id="phase"><span class="dot"></span><span>—</span></span>
     <span class="pill num" id="clock">--:--:--</span>
     <span class="pill feed" id="feed">—</span>
-    <span class="sep"></span>
-    <button class="ib" id="zminus" aria-label="Smaller text" title="Smaller text (−)">A−</button>
-    <button class="ib" id="zplus" aria-label="Larger text" title="Larger text (+)">A+</button>
-    <button class="ib" id="theme" aria-pressed="false" aria-label="Light colours" title="Light colours for projectors"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 1.8a6.2 6.2 0 0 1 0 12.4z" fill="currentColor"/></svg></button>
-    <button class="ib" id="full" aria-pressed="false" aria-label="Full screen" title="Full screen"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 5.5v-4h4M10.5 1.5h4v4M14.5 10.5v4h-4M5.5 14.5h-4v-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
   </div>
 </header>
 <div class="tape" aria-label="Index ticker"><div class="run" id="tape"></div></div>
@@ -270,7 +261,7 @@ footer{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-
     <div class="panel"><div class="ph"><h2>Indices</h2><span class="tag">NSE · today · 1 month</span></div><div class="pb" id="idx"></div></div>
   </div>
   <div class="col c2">
-    <div class="panel"><div class="ph"><h2>Nifty 50 map</h2><span class="tag">size = free-float market cap · colour = % change · click any stock</span></div>
+    <div class="panel"><div class="ph"><h2>Nifty 50 map</h2><span class="tag grow" id="maptag">colour = % change · click any stock</span><div class="tfs" id="msize" role="group" aria-label="Tile size"><button data-sz="move" title="Bigger tile = bigger move today (every stock keeps a tile big enough for its name)">Size: move</button><button data-sz="cap" title="Tile size = free-float market cap">Cap</button><button data-sz="eq" title="Every stock the same size">Equal</button></div></div>
       <div class="pb"><div id="tmap"></div></div></div>
     <div class="panel"><div class="movers" id="movers"></div></div>
     <div class="duo">
@@ -321,9 +312,8 @@ footer{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-
 (function(){
 'use strict';
 const $=id=>document.getElementById(id);
-const ZOOMS=[0.82,0.9,1,1.1,1.2,1.32,1.45];
 const store={get(k,d){try{const v=localStorage.getItem('n50.'+k);return v==null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem('n50.'+k,JSON.stringify(v))}catch(e){}}};
-const S={snap:null,by:{},mkt:null,q:{},sel:store.get('sel','HDFCBANK'),tf:'3m',stock:null,daily:null,y1:null,news:null,model:undefined,tab:'market',busy:{},last:{}};
+const S={snap:null,by:{},mkt:null,q:{},sel:store.get('sel','HDFCBANK'),tf:'3m',msz:(m=>['move','cap','eq'].includes(m)?m:'move')(store.get('msize','move')),stock:null,daily:null,y1:null,news:null,model:undefined,tab:'market',busy:{},last:{}};
 /* Research constants from the development test (2019 to Sep 2025, out-of-sample walk-forward), per decile of the 5-session score:
    quantiles of z = log 5-session return / (60-day daily volatility x sqrt 5) at 10/25/50/75/90%, share that beat the Nifty, mean excess return. */
 const PROJ=[[-1.2073,-0.5839,0.0171,0.6126,1.2990,.4588,-.0007],[-1.2231,-0.5583,0.0321,0.6231,1.2509,.4649,-.0011],[-1.1826,-0.5364,0.0569,0.6369,1.2683,.4796,-.0001],[-1.1958,-0.5397,0.0597,0.6657,1.2904,.4857,.0003],[-1.1958,-0.5422,0.0652,0.6751,1.2943,.4830,.0002],
@@ -350,20 +340,13 @@ async function api(p){if(window.__API__)return window.__API__(p);
   const j=await r.json().catch(()=>({}));if(!r.ok&&!j.health)throw new Error(j.error||j.detail||('HTTP '+r.status));return j}
 
 /* preferences and tools */
-let zi=store.get('zoom',2);if(!(zi>=0&&zi<ZOOMS.length))zi=2;
-function applyZoom(){document.documentElement.style.setProperty('--z',ZOOMS[zi]);store.set('zoom',zi);requestAnimationFrame(redraw)}
-$('zminus').onclick=()=>{if(zi>0){zi--;applyZoom()}};$('zplus').onclick=()=>{if(zi<ZOOMS.length-1){zi++;applyZoom()}};
-function applyTheme(t){document.documentElement.classList.toggle('lite',t==='lite');$('theme').setAttribute('aria-pressed',t==='lite');store.set('theme',t);requestAnimationFrame(redraw)}
-$('theme').onclick=()=>applyTheme(document.documentElement.classList.contains('lite')?'dark':'lite');
-$('full').onclick=()=>{try{if(!document.fullscreenElement)document.documentElement.requestFullscreen().catch(()=>{});else document.exitFullscreen().catch(()=>{})}catch(e){}};
-document.addEventListener('fullscreenchange',()=>$('full').setAttribute('aria-pressed',!!document.fullscreenElement));
 setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString('en-GB',{...IST,hour12:false})+' IST'},1000);
 
 function setTab(t,push){if(t!=='stock')t='market';S.tab=t;['market','stock'].forEach(x=>{$('v-'+x).hidden=x!==t;$('t-'+x).setAttribute('aria-selected',x===t)});
   store.set('tab',t);if(push){try{history.replaceState(null,'','#'+t)}catch(e){}}requestAnimationFrame(()=>{if(t==='market')renderMarketAll();else renderStockAll()})}
 document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab,true));
 document.addEventListener('keydown',e=>{if((e.target.closest&&e.target.closest('select,input,textarea'))||e.ctrlKey||e.metaKey||e.altKey)return;
-  if(e.key==='1')setTab('market',true);else if(e.key==='2')setTab('stock',true);else if(e.key==='+'||e.key==='=')$('zplus').click();else if(e.key==='-')$('zminus').click()});
+  if(e.key==='1')setTab('market',true);else if(e.key==='2')setTab('stock',true);});
 function select(sym,open){if(!sym||!S.by[sym])return;const same=sym===S.sel&&S.stock;S.sel=sym;store.set('sel',sym);$('tsym').textContent=sym;if(open)setTab('stock',true);
   if(same)return;S.stock=null;S.daily=null;S.y1=null;S.news=null;if(S.tf==='5m'||S.tf==='1y')S.tf='3m';renderStockAll();loadStock(true);loadDaily();loadNews()}
 document.addEventListener('click',e=>{const el=e.target.closest('[data-sym]');if(el)select(el.dataset.sym,true)});
@@ -411,14 +394,39 @@ function squarify(items,x,y,w,h){const out=[];let rest=items.slice().sort((a,b)=
     for(let i=0;i<rest.length;i++){const r=row.concat(rest[i]),s=r.reduce((t,o)=>t+o.a,0),mx=Math.max(...r.map(o=>o.a)),mn=Math.min(...r.map(o=>o.a)),worst=Math.max(sd*sd*mx/(s*s),s*s/(sd*sd*mn));if(worst<=best){best=worst;row=r}else break}
     const s=row.reduce((t,o)=>t+o.a,0);if(w>=h){const cw=s/h;let cy=y;row.forEach(o=>{const ch=o.a/cw;out.push({...o,x,y:cy,w:cw,h:ch});cy+=ch});x+=cw;w-=cw}else{const ch=s/w;let cx=x;row.forEach(o=>{const cw2=o.a/ch;out.push({...o,x:cx,y,w:cw2,h:ch});cx+=cw2});y+=ch;h-=ch}
     rest=rest.slice(row.length)}return out}
-function renderMap(){const el=$('tmap');if(!el||!S.snap||S.tab!=='market')return;const W=el.clientWidth,H=el.clientHeight;if(W<50||H<50)return;const fs=rootPx();
-  const groups=(S.snap.groups||[]).map(g=>({name:g.name,avg:g.avg,stocks:g.stocks.map(k=>({sym:k,v:(S.q[k]&&S.q[k].ffmc)||1,s:S.by[k]})).filter(o=>o.s)}));
+/* Tile size: today's move (default), free-float market cap, or equal. Every stock must show its name: when a
+   layout leaves a name unreadable (< 8 px), small tiles get a floor in proportion to their name's width, raised
+   step by step until every name fits (the last step sizes tiles by name width alone). In 'move' mode the weights
+   refresh at most once a minute so the map does not reshuffle on every tick. */
+let mapW={t:0,w:null,mode:null};
+function mapWeights(){const now=Date.now(),mode=S.msz,n=Object.keys(S.by).length;
+  if(mapW.w&&mapW.mode===mode&&mapW.n===n&&(mode!=='move'||now-mapW.t<60000))return mapW.w;
+  const w={};Object.values(S.by).forEach(s=>{w[s.sym]=mode==='cap'?((S.q[s.sym]&&S.q[s.sym].ffmc)||0):mode==='eq'?1:Math.min(Math.abs(s.pct||0),6)});
+  const m=Object.values(w).reduce((a,b)=>a+b,0)/(n||1);Object.keys(w).forEach(k=>w[k]=m>0?w[k]/m:1);   // mean 1 (equal until caps load)
+  mapW={t:now,w,mode,n};return w}
+const _tw={},_cv=document.createElement('canvas').getContext('2d');
+function nameW(sym){const fam=getComputedStyle(document.documentElement).getPropertyValue('--cond'),k=fam+'|'+sym;   // width at 10 px
+  if(_tw[k]==null){_cv.font=`700 10px ${fam}`;_tw[k]=_cv.measureText(sym).width*1.01+.1*sym.length}return _tw[k]}
+function mapLayout(W,H,fs,val){const top=fs*1.05,out=[],miss=[];
+  const groups=(S.snap.groups||[]).map(g=>({name:g.name,avg:g.avg,stocks:g.stocks.map(k=>({sym:k,v:val(k),s:S.by[k]})).filter(o=>o.s&&o.v>0)})).filter(g=>g.stocks.length);
   groups.forEach(g=>g.v=g.stocks.reduce((t,o)=>t+o.v,0));
-  let html='';squarify(groups,0,0,W,H).forEach(g=>{const top=fs*1.05;
+  squarify(groups,0,0,W,H).forEach(g=>{const tiles=squarify(g.stocks,g.x,g.y+top,g.w,Math.max(1,g.h-top));
+    tiles.forEach(t=>{t.f=Math.min(fs*1.25,(t.h-2)/1.2,(t.w-5)/nameW(t.s.sym)*10);t.fv=Math.min(fs*1.1,(t.w-2)/1.2,(t.h-5)/nameW(t.s.sym)*10);if(t.f<8)miss.push(t.s.sym)});out.push({g,tiles})});
+  return {out,miss,fit:!miss.length&&out.length>0,lost:out.reduce((n,o)=>n+o.tiles.filter(t=>t.f<8&&t.fv<8).length,0)}}
+function renderMap(){const el=$('tmap');if(!el||!S.snap||S.tab!=='market')return;const W=el.clientWidth,H=el.clientHeight;if(W<50||H<50)return;const fs=rootPx();
+  document.querySelectorAll('#msize button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.sz===S.msz));
+  const w=mapWeights(),syms=Object.keys(S.by),avgW=syms.reduce((t,k)=>t+nameW(k),0)/(syms.length||1);let L,floor=0;
+  const val=(k,boost)=>s=>((k>=1e9?0:(w[s]||0))+(k>=1e9?1:k)*nameW(s)/avgW)*(boost[s]||1);let best=null;
+  for(const k of [0,0.15,0.3,0.5,0.8,1.2,2,3.5,6,1e9]){floor=k;L=mapLayout(W,H,fs,val(k,{}));if(!best||L.out.length&&L.miss.length<best.miss.length)best=L;if(L.fit)break}
+  if(!L.fit){const boost={};for(let i=0;i<12&&!L.fit;i++){best.miss.forEach(s=>boost[s]=(boost[s]||1)*1.5);L=mapLayout(W,H,fs,val(floor,boost));if(L.miss.length<best.miss.length||(L.miss.length===best.miss.length&&L.lost<best.lost))best=L}L=best}   // enlarge the few that still do not fit
+  $('maptag').textContent=(S.msz==='move'?'size = today\'s move':S.msz==='cap'?'size = free-float market cap':'equal size')+' · colour = % change';
+  let html='';L.out.forEach(({g,tiles})=>{
     html+=`<div class="tg" style="left:${g.x}px;top:${g.y}px;width:${g.w}px">${esc(title(g.name))} <span class="num ${cls(g.avg)}">${pct(g.avg)}</span></div>`;
-    squarify(g.stocks,g.x,g.y+top,g.w,Math.max(1,g.h-top)).forEach(t=>{const s=t.s,f=Math.min(fs*1.25,t.h/3.6,(t.w-6)/(s.sym.length*0.62)),fp=Math.min(f,(t.w-6)/(6*0.62)),show=f>=8;
-      html+=`<div class="tm" data-sym="${esc(s.sym)}" tabindex="0" role="button" title="${esc(s.name)} · ₹${fmt(s.ltp)} · ${pct(s.pct)}" style="left:${t.x}px;top:${t.y}px;width:${t.w}px;height:${t.h}px;background:${heat(s.pct)}">${show?`<b style="font-size:${f.toFixed(1)}px">${esc(s.sym)}</b>`:''}${show&&t.h>f*2.4&&fp>=8?`<span style="font-size:${fp.toFixed(1)}px">${pct(s.pct)}</span>`:''}${show&&t.h>f*3.8&&fp>=8?`<span class="dim" style="font-size:${(fp*.85).toFixed(1)}px">₹${fmt(s.ltp,s.ltp<1000?2:0)}</span>`:''}</div>`})});
+    tiles.forEach(t=>{const s=t.s,f=Math.min(t.f,t.h/3.6>=8?t.h/3.6:t.f),fp=Math.min(f,(t.w-5)/(6*0.6)),show=f>=8,room=h=>t.h>=h+2,rot=!show&&t.fv>=8;
+      html+=`<div class="tm" data-sym="${esc(s.sym)}" tabindex="0" role="button" title="${esc(s.name)} · ₹${fmt(s.ltp)} · ${pct(s.pct)}" style="left:${t.x}px;top:${t.y}px;width:${t.w}px;height:${t.h}px;background:${heat(s.pct)}">${rot?`<b class="rot" style="font-size:${t.fv.toFixed(1)}px">${esc(s.sym)}</b>`:''}${show?`<b style="font-size:${f.toFixed(1)}px">${esc(s.sym)}</b>`:''}${show&&fp>=8&&room(f*1.15+fp*1.15)?`<span style="font-size:${fp.toFixed(1)}px">${pct(s.pct)}</span>`:''}${show&&fp>=8&&room(f*1.15+fp*1.15+fp*.98)?`<span class="dim" style="font-size:${(fp*.85).toFixed(1)}px">₹${fmt(s.ltp,s.ltp<1000?2:0)}</span>`:''}</div>`})});
   el.innerHTML=html}
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(()=>{for(const k in _tw)delete _tw[k];requestAnimationFrame(redraw)});
+document.querySelectorAll('#msize button').forEach(b=>b.onclick=()=>{S.msz=b.dataset.sz;store.set('msize',S.msz);mapW.w=null;renderMap()});
 function renderMovers(){const s=S.snap;if(!s)return;const all=(s.stocks||[]).slice().sort((a,b)=>b.pct-a.pct),g=all.slice(0,6),l=all.slice(-6).reverse();
   const chip=x=>`<span class="mc" data-sym="${esc(x.sym)}" tabindex="0" role="button"><b>${esc(x.sym)}</b><span class="num ${cls(x.pct)}">${pct(x.pct)}</span></span>`;
   $('movers').innerHTML=`<span class="lab">Gainers</span><div class="chips">${g.map(chip).join('')}</div><span class="lab">Losers</span><div class="chips">${l.map(chip).join('')}</div>`}
@@ -592,7 +600,7 @@ if(window.ResizeObserver){new ResizeObserver(()=>redraw()).observe(document.quer
 async function loadSnap(){if(S.busy.snap)return;S.busy.snap=1;try{const s=await api('api/snapshot');if(s.loading||s.error){$('loading').style.display='flex';$('loading').textContent=s.error?'Market data unavailable':'Connecting to market data…';return}
   $('loading').style.display='none';S.snap=s;S.by={};(s.stocks||[]).forEach(x=>S.by[x.sym]=x);if(!S.by[S.sel])S.sel=(S.by.HDFCBANK||s.stocks[0]).sym;
   renderMarketAll();renderStockAll();if(!S.stock)loadStock(true);if(!S.daily)loadDaily();if(!S.news)loadNews()}catch(e){console.warn(e)}finally{S.busy.snap=0}}
-async function loadMarket(){try{const m=await api('api/market');if(m&&(m.indices||m.global)){S.mkt=m;S.q={};(m.quotes||[]).forEach(q=>S.q[q.sym]=q)}}catch(e){}S.last.mkt=Date.now();renderMarketAll();renderStockAll()}
+async function loadMarket(){try{const m=await api('api/market');if(m&&(m.indices||m.global)){S.mkt=m;S.q={};(m.quotes||[]).forEach(q=>S.q[q.sym]=q);if(S.msz==='cap')mapW.w=null}}catch(e){}S.last.mkt=Date.now();renderMarketAll();renderStockAll()}
 async function loadStock(force){if(!S.sel||(S.busy.stock&&!force))return;S.busy.stock=1;const sym=S.sel;
   try{const d=await api(`api/stock/${encodeURIComponent(sym)}?tf=5m`);if(sym!==S.sel||d.error||d.loading)return;S.stock=d;S.last.stock=Date.now();renderStockAll()}catch(e){console.warn(e)}finally{S.busy.stock=0}}
 async function loadDaily(){const sym=S.sel;try{const d=await api(`api/daily/${encodeURIComponent(sym)}`);if(sym===S.sel&&d&&d.c){S.daily=d;renderStockAll()}}catch(e){console.warn(e)}}
@@ -601,7 +609,7 @@ async function loadNews(){const sym=S.sel;try{const j=await api(`api/news/${enco
 async function loadModel(){S.last.model=Date.now();try{const j=await api('api/model');S.model=j&&j.stocks?j:null}catch(e){S.model=null}renderMarketAll();renderStockAll()}
 
 let t0=store.get('tab','market');try{const h=(location.hash||'').slice(1);if(h==='market'||h==='stock')t0=h}catch(e){}
-applyTheme(store.get('theme','dark'));document.documentElement.style.setProperty('--z',ZOOMS[zi]);setTab(t0,false);$('tsym').textContent=S.sel;
+setTab(t0,false);$('tsym').textContent=S.sel;
 loadSnap().then(()=>{loadMarket();loadModel()});
 let tick=0;setInterval(()=>{tick++;const open=S.snap&&S.snap.phase!=='CLOSED';if(open||tick%10===0)loadSnap();if(Date.now()-(S.last.stock||0)>(open?10000:60000))loadStock();
   if(Date.now()-(S.last.mkt||0)>(open?60000:600000))loadMarket();if(Date.now()-(S.last.news||0)>300000)loadNews();if(Date.now()-(S.last.model||0)>600000)loadModel()},3000);
