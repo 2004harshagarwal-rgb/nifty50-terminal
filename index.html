@@ -204,8 +204,8 @@ svg .lvp{stroke:var(--mute)}svg .lvr{stroke:var(--dn)}svg .lvs{stroke:var(--up)}
 svg .tl{paint-order:stroke;stroke:var(--panel);stroke-width:3px;stroke-linejoin:round}
 svg .tlp{fill:var(--mute)}svg .tlr{fill:var(--dn)}svg .tls{fill:var(--up)}
 svg .tag{fill:var(--amb)}svg .tagt{fill:var(--on-amb);font-weight:600}svg .xh{stroke:var(--dim);stroke-dasharray:3 3}
-svg .f80{fill:var(--amb);opacity:.13}svg .f50{fill:var(--amb);opacity:.26}svg .fmid{stroke:var(--amb);fill:none;stroke-dasharray:5 3}
-svg .fdiv{stroke:var(--amb);stroke-dasharray:2 3;opacity:.7}svg .ft{fill:var(--amb-ink)}
+svg .f80{fill:var(--amb);opacity:.18}svg .f50{fill:var(--amb);opacity:.34}svg .fmid{stroke:var(--amb);fill:none;stroke-dasharray:5 3}
+svg .fdiv{stroke:var(--amb);stroke-dasharray:2 3;opacity:.7}svg .ft{fill:var(--amb-ink)}svg .fk{fill:var(--amb-ink);opacity:.75}svg .fzone{fill:var(--amb);opacity:.05}svg .fcone{fill:var(--amb);opacity:.08}
 .rd{grid-template-columns:repeat(6,minmax(0,1fr))}
 .rd .cell{border-left:3px solid var(--neu)}
 .rd .cell.bull{border-left-color:var(--up)}.rd .cell.bull b{color:var(--up)}
@@ -553,37 +553,43 @@ function renderChart(){const box=$('chartbox'),svg=$('chart');if(!box||S.tab!=='
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`);const fs=rootPx(),f1=(fs*.74).toFixed(1),f2=(fs*.7).toFixed(1),cd=chartData(),d=D(),av=avail();
   document.querySelectorAll('#tfs button').forEach(b=>{b.setAttribute('aria-pressed',b.dataset.tf===S.tf);const ok=av.includes(b.dataset.tf);b.disabled=!ok;b.title=ok?'':'Not saved in this preview'});
   if(!cd){svg.innerHTML=`<text class="ax" x="${W/2}" y="${H/2}" text-anchor="middle" font-size="${fs*.85}">${S.stock||S.daily?'No data for this view.':'Loading…'}</text>`;$('readout').textContent='—';$('legend').innerHTML='';return}
-  const c=cd.c,n=c.length,bx=cd.box,fut=bx&&bx.slot>=n?1:0,L=d.levels||{},lv=cd.lv;
+  const c=cd.c,n=c.length,bx=cd.box&&cd.box.slot>=n-1?cd.box:null,m=bx&&bx.slot===n-1?n-1:n,L=d.levels||{},lv=cd.lv;
   $('legend').innerHTML=cd.intraday?'<span><i style="border-color:var(--blue)"></i>VWAP</span><span><i style="border-color:var(--mute);border-top-style:dashed"></i>Prev close</span>'+(lv?'<span><i style="border-color:var(--up);border-top-style:dashed"></i>↑ 70% level</span><span><i style="border-color:var(--dn);border-top-style:dashed"></i>↓ 70% level</span><span><i class="box" style="background:var(--amb);opacity:.4"></i>predicted 80% close range</span>':'<span><i style="border-color:var(--dn);border-top-style:dashed"></i>R1</span><span><i style="border-color:var(--up);border-top-style:dashed"></i>S1</span>')
     :'<span><i style="border-color:var(--blue)"></i>20-day avg</span><span><i style="border-color:var(--vio)"></i>50-day avg</span>'+(bx?'<span><i class="box" style="background:var(--amb);opacity:.55"></i>next session: close 50% · 80%, expected high / low</span>':'');
   const PR=Math.round(fs*4.6),PL=Math.round(fs*.3),axH=Math.round(fs*1.4),volH=Math.round(Math.max(H*.13,fs*2)),top=Math.round(fs*.8),pB=H-axH-volH-Math.round(fs*.4);
   let lo=Math.min(...c.map(x=>x[3]??x[4])),hi=Math.max(...c.map(x=>x[2]??x[4]));const pz=bx?bx.r:lv;if(pz){lo=Math.min(lo,pz.c80[0],pz.exp_low);hi=Math.max(hi,pz.c80[1],pz.exp_high)}
   const lines=cd.intraday?(lv?[['Prev',L.prev,'lvp','tlp'],['↑ 70%',lv.up_level,'lvs','tls'],['↓ 70%',lv.dn_level,'lvr','tlr']]:[['Prev',L.prev,'lvp','tlp'],['R1',L.pivot_r1,'lvr','tlr'],['S1',L.pivot_s1,'lvs','tls']]):[];
   const sp0=hi-lo||1;lines.forEach(l=>{if(l[1]&&l[1]>lo-sp0*.3&&l[1]<hi+sp0*.3){lo=Math.min(lo,l[1]);hi=Math.max(hi,l[1])}});const pad=(hi-lo)*.05||1;lo-=pad;hi+=pad;
-  const slots=n+fut,step=(W-PR-PL)/slots,X=i=>PL+(i+.5)*step,Y=v=>top+(hi-v)/(hi-lo)*(pB-top),bw=Math.max(1,Math.min(fs*.8,step*.66)),lastY=Y(c[n-1][4]);let g='';
+  const PW=W-PR-PL,zW=bx?Math.round(Math.min(PW*.3,Math.max(fs*9,PW*.18))):0,step=(PW-zW)/Math.max(1,m),zx0=PL+m*step,zx1=W-PR,zc=(zx0+zx1)/2,X=i=>i<m?PL+(i+.5)*step:zc,Y=v=>top+(hi-v)/(hi-lo)*(pB-top),bw0=Math.max(1,Math.min(fs*.8,step*.66)),bw=bw0,lastY=Y(c[n-1][4]);let g='';
   niceTicks(lo,hi,Math.max(3,Math.round((pB-top)/(fs*2.8)))).forEach(v=>{const y=Y(v);if(y<top-1||y>pB+1)return;g+=`<line class="gl" x1="${PL}" x2="${W-PR}" y1="${y}" y2="${y}"/>`+(Math.abs(y-lastY)<fs*1.05?'':`<text class="ax" x="${W-PR+fs*.45}" y="${y+fs*.27}" font-size="${f2}">${fmt(v,v<100?2:v<1000?1:0)}</text>`)});
   const lab=t=>cd.intraday?new Date(t).toLocaleTimeString('en-GB',{...IST,hour:'2-digit',minute:'2-digit'}):new Date(t).toLocaleDateString('en-GB',{...IST,day:'2-digit',month:'short'});
-  const every=Math.max(1,Math.ceil(n/Math.max(2,Math.floor((W-PR)/(fs*5.4)))));for(let i=0;i<n-(fut?Math.ceil(every*.6):0);i+=every)g+=`<text class="ax" x="${X(i)}" y="${H-fs*.3}" font-size="${f2}" text-anchor="middle">${lab(c[i][0])}</text>`;
+  const every=Math.max(1,Math.ceil(n/Math.max(2,Math.floor((W-PR)/(fs*5.4)))));for(let i=0;i<m;i+=every)if(!bx||X(i)<zx0-fs*1.8)g+=`<text class="ax" x="${X(i)}" y="${H-fs*.3}" font-size="${f2}" text-anchor="middle">${lab(c[i][0])}</text>`;
   lines.forEach(l=>{if(!l[1]||l[1]<lo||l[1]>hi)return;const y=Y(l[1]);g+=`<line class="${l[2]}" x1="${PL}" x2="${W-PR}" y1="${y}" y2="${y}" stroke-dasharray="5 4" stroke-opacity=".8"/><text class="tl ${l[3]}" x="${PL+fs*.3}" y="${y-fs*.25}" font-size="${f1}">${l[0]} ${fmt(l[1])}</text>`});
   let body='';
   if(lv){body+=`<rect class="f80" x="${PL}" y="${Y(lv.c80[1])}" width="${W-PR-PL}" height="${Math.max(1,Y(lv.c80[0])-Y(lv.c80[1]))}"/>`}
-  if(bx){const r=bx.r,xc=X(bx.slot),bw2=Math.max(bw*1.9,fs*.9),R=(a,b2,cl3)=>`<rect class="${cl3}" x="${xc-bw2/2}" y="${Y(b2)}" width="${bw2}" height="${Math.max(1,Y(a)-Y(b2))}"/>`;
-    body+=R(r.c80[0],r.c80[1],'f80')+R(r.c50[0],r.c50[1],'f50')+`<line class="fmid" stroke-width="1.6" x1="${xc-bw2/2}" x2="${xc+bw2/2}" y1="${Y(r.exp_high)}" y2="${Y(r.exp_high)}"/><line class="fmid" stroke-width="1.6" x1="${xc-bw2/2}" x2="${xc+bw2/2}" y1="${Y(r.exp_low)}" y2="${Y(r.exp_low)}"/>`;
-    if(fut){const xd=(X(n-1)+X(n))/2;body+=`<line class="fdiv" x1="${xd}" x2="${xd}" y1="${top}" y2="${pB}"/>`}
-    g+=`<text class="ax" x="${xc}" y="${H-fs*.3}" font-size="${f2}" text-anchor="middle" style="fill:var(--amb-ink)">${dshort(bx.date)}</text>`;
-    [[r.exp_high,-.35,'H '],[r.exp_low,.95,'L ']].forEach(([v,o,t])=>{body+=`<text class="tl ft" x="${xc-bw2/2-fs*.2}" y="${Y(v)+fs*o}" font-size="${f2}" text-anchor="end">${t}${fmt(v,v<1000?1:0)}</text>`})}
+  if(bx){const r=bx.r,x0=zx0+fs*.55,x1=zx1-fs*.35,ref=r.close||c[m-1][4],xl=X(m-1),hh=v=>Y(v),
+      R=(a,b2,cl3)=>`<rect class="${cl3}" x="${x0}" y="${hh(b2)}" width="${x1-x0}" height="${Math.max(1,hh(a)-hh(b2))}" rx="2"/>`;
+    g+=`<rect class="fzone" x="${zx0}" y="${top}" width="${zx1-zx0}" height="${pB-top}"/><line class="fdiv" x1="${zx0}" x2="${zx0}" y1="${top}" y2="${pB}"/>`+
+      `<text class="ft" x="${zc}" y="${top+fs*.95}" font-size="${f1}" text-anchor="middle" font-weight="600">Next session</text>`+
+      `<text class="ax" x="${zc}" y="${H-fs*.3}" font-size="${f2}" text-anchor="middle" style="fill:var(--amb-ink)">${dshort(bx.date)}</text>`;
+    body+=`<polygon class="fcone" points="${xl},${hh(ref)} ${x0},${hh(r.c80[1])} ${x0},${hh(r.c80[0])}"/>`+R(r.c80[0],r.c80[1],'f80')+R(r.c50[0],r.c50[1],'f50')+
+      `<line class="fmid" stroke-width="1.8" x1="${x0}" x2="${x1}" y1="${hh(r.exp_high)}" y2="${hh(r.exp_high)}"/><line class="fmid" stroke-width="1.8" x1="${x0}" x2="${x1}" y1="${hh(r.exp_low)}" y2="${hh(r.exp_low)}"/>`;
+    const tx=x0+fs*.3,used=[];const put=(y,t,cl3)=>{if(used.some(u=>Math.abs(u-y)<fs*.95))return;used.push(y);body+=`<text class="${cl3}" x="${tx}" y="${y}" font-size="${f2}">${t}</text>`};
+    put(hh(r.exp_high)-fs*.3,'exp. high '+fmt(r.exp_high,r.exp_high<1000?1:0),'tl ft');put(hh(r.exp_low)+fs*.95,'exp. low '+fmt(r.exp_low,r.exp_low<1000?1:0),'tl ft');
+    if(hh(r.c50[0])-hh(r.c50[1])>fs*1.1)put((hh(r.c50[0])+hh(r.c50[1]))/2+fs*.3,'50%','tl fk');
+    if(hh(r.c50[1])-hh(r.c80[1])>fs*1.1)put((hh(r.c50[1])+hh(r.c80[1]))/2+fs*.3,'80%','tl fk')}
   if(cd.line||n>260)body=`<polyline class="ln" stroke-width="1.6" points="${c.map((x,i)=>X(i).toFixed(1)+','+Y(x[4]).toFixed(1)).join(' ')}"/>`;
-  else c.forEach((x,i)=>{const u=x[4]>=x[1];body+=`<line class="${u?'ups':'dns'}" x1="${X(i)}" x2="${X(i)}" y1="${Y(x[2])}" y2="${Y(x[3])}"/><rect class="${u?'upf':'dnf'}" x="${X(i)-bw/2}" y="${Math.min(Y(x[1]),Y(x[4]))}" width="${bw}" height="${Math.max(1,Math.abs(Y(x[1])-Y(x[4])))}"/>`});
+  else c.forEach((x,i)=>{const u=x[4]>=x[1],bw=i<m?bw0:Math.min(bw0*1.8,fs*1.3);body+=`<line class="${u?'ups':'dns'}" x1="${X(i)}" x2="${X(i)}" y1="${Y(x[2])}" y2="${Y(x[3])}"/><rect class="${u?'upf':'dnf'}" x="${X(i)-bw/2}" y="${Math.min(Y(x[1]),Y(x[4]))}" width="${bw}" height="${Math.max(1,Math.abs(Y(x[1])-Y(x[4])))}"/>`});
   if(cd.intraday){let pv=0,vv=0;body+=`<polyline class="vw" stroke-width="1.5" points="${c.map((x,i)=>{pv+=(x[2]+x[3]+x[4])/3*(x[5]||0);vv+=(x[5]||0);return X(i).toFixed(1)+','+Y(vv?pv/vv:x[4]).toFixed(1)}).join(' ')}"/>`}
-  else{const cl=c.map(x=>x[4]);[[20,'ma'],[50,'ma2']].forEach(([k,cl2])=>{const pts=[];for(let i=k-1;i<n;i++)pts.push(X(i).toFixed(1)+','+Y(sma(cl,k,i)).toFixed(1));if(pts.length>1)body+=`<polyline class="${cl2}" stroke-width="1.3" points="${pts.join(' ')}"/>`})}
+  else{const cl=c.map(x=>x[4]);[[20,'ma'],[50,'ma2']].forEach(([k,cl2])=>{const pts=[];for(let i=k-1;i<m;i++)pts.push(X(i).toFixed(1)+','+Y(sma(cl,k,i)).toFixed(1));if(pts.length>1)body+=`<polyline class="${cl2}" stroke-width="1.3" points="${pts.join(' ')}"/>`})}
   const vmax=Math.max(...c.map(x=>x[5]||0))||1,vt=H-axH-volH;let vol=`<line class="gl" x1="${PL}" x2="${W-PR}" y1="${vt-fs*.2}" y2="${vt-fs*.2}"/><text class="ax" x="${W-PR+fs*.45}" y="${vt+fs*.6}" font-size="${f2}">VOL</text>`;
   c.forEach((x,i)=>{const h=(x[5]||0)/vmax*(volH-fs*.3),u=x[1]==null?(i===0||x[4]>=c[i-1][4]):x[4]>=x[1];vol+=`<rect class="${u?'upf':'dnf'}" opacity=".45" x="${X(i)-bw/2}" y="${vt+volH-fs*.3-h}" width="${bw}" height="${h}"/>`});
   const tag=`<rect class="tag" x="${W-PR+2}" y="${lastY-fs*.58}" width="${PR-4}" height="${fs*1.16}" rx="2"/><text class="tagt" x="${W-PR+fs*.4}" y="${lastY+fs*.3}" font-size="${f1}">${fmt(c[n-1][4])}</text>`;
-  svg.innerHTML=g+body+vol+tag+`<line id="xh" class="xh" x1="0" x2="0" y1="${top}" y2="${H-axH}" visibility="hidden"/><rect id="hit" x="${PL}" y="0" width="${W-PR-PL}" height="${H}" fill="transparent"/>`;
+  svg.innerHTML=g+body+vol+tag+`<line id="xh" class="xh" x1="0" x2="0" y1="${top}" y2="${H-axH}" visibility="hidden"/><rect id="hit" x="${PL}" y="0" width="${PW}" height="${H}" fill="transparent"/>`;
   const read=i=>{if(bx&&(i===bx.slot)&&(i>=n||true)){const r=bx.r,x=i<n?c[i]:null;$('readout').innerHTML=`<span class="amb">Prediction for ${dshort(bx.date)}</span> · expected high ₹${fmt(r.exp_high)} · low ₹${fmt(r.exp_low)} · close 80% ₹${fmt(r.c80[0])}–${fmt(r.c80[1])} · 50% ₹${fmt(r.c50[0])}–${fmt(r.c50[1])}`+(x&&x[2]!=null?` · <b>actual</b> H ${fmt(x[2])} L ${fmt(x[3])} C ${fmt(x[4])}`:'');return}
     i=Math.min(i,n-1);const x=c[i],t=new Date(x[0]),when=cd.intraday?t.toLocaleTimeString('en-GB',{...IST,hour:'2-digit',minute:'2-digit'})+' · '+t.toLocaleDateString('en-GB',{...IST,day:'2-digit',month:'short'}):t.toLocaleDateString('en-GB',{...IST,weekday:'short',day:'2-digit',month:'short',year:'numeric'});
     $('readout').innerHTML=x[1]==null?`${when} · close <span class="${i&&x[4]>=c[i-1][4]?'up':'dn'}">${fmt(x[4])}</span>${i?' ('+pct((x[4]/c[i-1][4]-1)*100)+')':''} · vol ${big(x[5])}`:`${when} · O ${fmt(x[1])} · H ${fmt(x[2])} · L ${fmt(x[3])} · C <span class="${x[4]>=x[1]?'up':'dn'}">${fmt(x[4])}</span> · vol ${big(x[5])}`};
-  read(n-1);const hit=$('hit'),xh=$('xh');hit.onpointermove=e=>{const r=svg.getBoundingClientRect(),i=Math.max(0,Math.min(slots-1,Math.floor((e.clientX-r.left-PL)/step)));xh.setAttribute('x1',X(i));xh.setAttribute('x2',X(i));xh.setAttribute('visibility','visible');read(i)};
+  read(n-1);const hit=$('hit'),xh=$('xh');hit.onpointermove=e=>{const r=svg.getBoundingClientRect(),px=e.clientX-r.left,i=bx&&px>=zx0?bx.slot:Math.max(0,Math.min(m-1,Math.floor((px-PL)/step)));xh.setAttribute('x1',X(i));xh.setAttribute('x2',X(i));xh.setAttribute('visibility','visible');read(i)};
   hit.onpointerleave=()=>{xh.setAttribute('visibility','hidden');read(n-1)}}
 document.querySelectorAll('#tfs button').forEach(b=>b.onclick=()=>{S.tf=b.dataset.tf;if(S.tf==='1y'&&!S.y1)load1y();renderChart()});
 function renderReadings(){const el=$('rd'),c=closes(),d=D(),L=d.levels||{},q=d.quote||{};if(!c){el.innerHTML='<div class="empty">Readings appear once prices load.</div>';return}
