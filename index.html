@@ -412,23 +412,30 @@ function mapWeights(){const now=Date.now(),mode=S.msz,n=Object.keys(S.by).length
 const _tw={},_cv=document.createElement('canvas').getContext('2d');
 function nameW(sym){const fam=getComputedStyle(document.documentElement).getPropertyValue('--cond'),k=fam+'|'+sym;   // width at 10 px
   if(_tw[k]==null){_cv.font=`700 10px ${fam}`;_tw[k]=_cv.measureText(sym).width*1.01+.1*sym.length}return _tw[k]}
-function mapLayout(W,H,fs,val){const top=fs*1.05,out=[],miss=[];
+function mapLayout(W,H,fs,val,MF=8){const top=fs*1.05,out=[],miss=[];
   const groups=(S.snap.groups||[]).map(g=>({name:g.name,avg:g.avg,stocks:g.stocks.map(k=>({sym:k,v:val(k),s:S.by[k]})).filter(o=>o.s&&o.v>0)})).filter(g=>g.stocks.length);
   groups.forEach(g=>g.v=g.stocks.reduce((t,o)=>t+o.v,0));
   squarify(groups,0,0,W,H).forEach(g=>{const tiles=squarify(g.stocks,g.x,g.y+top,g.w,Math.max(1,g.h-top));
-    tiles.forEach(t=>{t.f=Math.min(fs*1.25,(t.h-2)/1.2,(t.w-5)/nameW(t.s.sym)*10);t.fv=Math.min(fs*1.1,(t.w-2)/1.2,(t.h-5)/nameW(t.s.sym)*10);if(t.f<8)miss.push(t.s.sym)});out.push({g,tiles})});
-  return {out,miss,fit:!miss.length&&out.length>0,lost:out.reduce((n,o)=>n+o.tiles.filter(t=>t.f<8&&t.fv<8).length,0)}}
+    tiles.forEach(t=>{t.f=Math.min(fs*1.25,(t.h-2)/1.2,(t.w-5)/nameW(t.s.sym)*10);t.fv=Math.min(fs*1.1,(t.w-2)/1.2,(t.h-5)/nameW(t.s.sym)*10);if(t.f<MF)miss.push(t.s.sym)});out.push({g,tiles})});
+  return {out,miss,mf:MF,fit:!miss.length&&out.length>0,lost:out.reduce((n,o)=>n+o.tiles.filter(t=>t.f<MF&&t.fv<MF).length,0)}}
 function renderMap(){const el=$('tmap');if(!el||!S.snap||S.tab!=='market')return;const W=el.clientWidth,H=el.clientHeight;if(W<50||H<50)return;const fs=rootPx();
   document.querySelectorAll('#msize button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.sz===S.msz));
   const w=mapWeights(),syms=Object.keys(S.by),avgW=syms.reduce((t,k)=>t+nameW(k),0)/(syms.length||1);let L,floor=0;
-  const val=(k,boost)=>s=>((k>=1e9?0:(w[s]||0))+(k>=1e9?1:k)*nameW(s)/avgW)*(boost[s]||1);let best=null;
-  for(const k of [0,0.15,0.3,0.5,0.8,1.2,2,3.5,6,1e9]){floor=k;L=mapLayout(W,H,fs,val(k,{}));if(!best||L.out.length&&L.miss.length<best.miss.length)best=L;if(L.fit)break}
-  if(!L.fit){const boost={};for(let i=0;i<12&&!L.fit;i++){best.miss.forEach(s=>boost[s]=(boost[s]||1)*1.5);L=mapLayout(W,H,fs,val(floor,boost));if(L.miss.length<best.miss.length||(L.miss.length===best.miss.length&&L.lost<best.lost))best=L}L=best}   // enlarge the few that still do not fit
+  const val=(k,boost)=>s=>((k>=1e9?0:(w[s]||0))+(k>=1e9?1:k)*nameW(s)/avgW)*(boost[s]||1);
+  const better=(a,b)=>!b||(a.out.length&&(a.miss.length<b.miss.length||(a.miss.length===b.miss.length&&a.lost<b.lost)));
+  let pick=null;
+  for(const MF of [8,7,6.5]){                   // smallest name size: 8 px, then 7 and 6.5 px on very small screens
+    let best=null;
+    for(const k of [0,0.15,0.3,0.5,0.8,1.2,2,3.5,6,1e9]){floor=k;L=mapLayout(W,H,fs,val(k,{}),MF);if(better(L,best))best=L;if(L.fit)break}
+    if(!best.fit){const boost={};for(let i=0;i<12;i++){best.miss.forEach(s=>boost[s]=(boost[s]||1)*1.5);L=mapLayout(W,H,fs,val(floor,boost),MF);if(better(L,best))best=L;if(best.fit)break}}   // enlarge the few that still do not fit
+    if(!pick||best.lost<pick.lost)pick=best;
+    if(pick.lost===0)break}
+  L=pick;const MF=L.mf;
   $('maptag').textContent=(S.msz==='move'?'size = today\'s move':S.msz==='cap'?'size = free-float market cap':'equal size')+' · colour = % change';
   let html='';L.out.forEach(({g,tiles})=>{
     html+=`<div class="tg" style="left:${g.x}px;top:${g.y}px;width:${g.w}px">${esc(title(g.name))} <span class="num ${cls(g.avg)}">${pct(g.avg)}</span></div>`;
-    tiles.forEach(t=>{const s=t.s,f=Math.min(t.f,t.h/3.6>=8?t.h/3.6:t.f),fp=Math.min(f,(t.w-5)/(6*0.6)),show=f>=8,room=h=>t.h>=h+2,rot=!show&&t.fv>=8;
-      html+=`<div class="tm" data-sym="${esc(s.sym)}" tabindex="0" role="button" title="${esc(s.name)} · ₹${fmt(s.ltp)} · ${pct(s.pct)}" style="left:${t.x}px;top:${t.y}px;width:${t.w}px;height:${t.h}px;background:${heat(s.pct)}">${rot?`<b class="rot" style="font-size:${t.fv.toFixed(1)}px">${esc(s.sym)}</b>`:''}${show?`<b style="font-size:${f.toFixed(1)}px">${esc(s.sym)}</b>`:''}${show&&fp>=8&&room(f*1.15+fp*1.15)?`<span style="font-size:${fp.toFixed(1)}px">${pct(s.pct)}</span>`:''}${show&&fp>=8&&room(f*1.15+fp*1.15+fp*.98)?`<span class="dim" style="font-size:${(fp*.85).toFixed(1)}px">₹${fmt(s.ltp,s.ltp<1000?2:0)}</span>`:''}</div>`})});
+    tiles.forEach(t=>{const s=t.s,f=Math.min(t.f,t.h/3.6>=8?t.h/3.6:t.f),fp=Math.min(f,(t.w-5)/(6*0.6)),show=f>=MF,room=h=>t.h>=h+2,rot=!show&&t.fv>=MF;
+      html+=`<div class="tm" data-sym="${esc(s.sym)}" tabindex="0" role="button" title="${esc(s.name)} · ₹${fmt(s.ltp)} · ${pct(s.pct)}" style="left:${t.x}px;top:${t.y}px;width:${t.w}px;height:${t.h}px;background:${heat(s.pct)}">${rot?`<b class="rot" style="font-size:${t.fv.toFixed(1)}px">${esc(s.sym)}</b>`:''}${show?`<b style="font-size:${f.toFixed(1)}px">${esc(s.sym)}</b>`:''}${show&&fp>=MF&&room(f*1.15+fp*1.15)?`<span style="font-size:${fp.toFixed(1)}px">${pct(s.pct)}</span>`:''}${show&&fp>=MF&&room(f*1.15+fp*1.15+fp*.98)?`<span class="dim" style="font-size:${(fp*.85).toFixed(1)}px">₹${fmt(s.ltp,s.ltp<1000?2:0)}</span>`:''}</div>`})});
   el.innerHTML=html}
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(()=>{for(const k in _tw)delete _tw[k];requestAnimationFrame(redraw)});
 document.querySelectorAll('#msize button').forEach(b=>b.onclick=()=>{S.msz=b.dataset.sz;store.set('msize',S.msz);mapW.w=null;renderMap()});
